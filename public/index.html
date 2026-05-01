@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NetWatch NG — Nigeria Network Monitor</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --bg:    #f8f7f2;
+    --bg2:   #f0efe9;
+    --bg3:   #e8e7e0;
+    --bdr:   rgba(0,0,0,.1);
+    --bdr2:  rgba(0,0,0,.18);
+    --txt:   #1a1a18;
+    --txt2:  #6b6a64;
+    --txt3:  #9c9a92;
+    --green: #1D9E75;
+    --blue:  #185FA5;
+    --amber: #BA7517;
+    --red:   #A32D2D;
+    --purple:#534AB7;
+  }
+  @media(prefers-color-scheme:dark){
+    :root{
+      --bg:#1e1e1c;--bg2:#252523;--bg3:#2e2e2b;
+      --bdr:rgba(255,255,255,.08);--bdr2:rgba(255,255,255,.15);
+      --txt:#e8e6df;--txt2:#9c9a92;--txt3:#6b6a64;
+    }
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--txt);height:100vh;display:flex;flex-direction:column;overflow:hidden}
+
+  /* ── header ── */
+  .hdr{background:var(--bg2);border-bottom:0.5px solid var(--bdr);padding:10px 16px;display:flex;align-items:center;gap:12px;flex-shrink:0}
+  .logo{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);animation:blink 1.5s infinite}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+  .kpis{display:flex;gap:8px;flex:1}
+  .kpi{flex:1;background:var(--bg);border:0.5px solid var(--bdr);border-radius:8px;padding:5px 10px;min-width:0}
+  .kpi-l{font-size:10px;color:var(--txt3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpi-v{font-size:14px;font-weight:600;font-family:monospace}
+  .api-status{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:500;white-space:nowrap}
+  .api-ok{background:#e1f5ee;color:#0f6e56}.api-err{background:#fcebeb;color:#a32d2d}
+
+  /* ── tabs ── */
+  .tabs{display:flex;border-bottom:0.5px solid var(--bdr);background:var(--bg2);flex-shrink:0}
+  .tab{padding:9px 16px;font-size:13px;color:var(--txt2);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;font-family:inherit;transition:color .15s}
+  .tab:hover{color:var(--txt)}.tab.on{color:var(--txt);border-bottom-color:var(--green)}
+
+  /* ── content area ── */
+  .content{flex:1;overflow:hidden}
+  .panel{display:none;height:100%}.panel.on{display:flex}
+
+  /* ── MAP ── */
+  .map-wrap{flex:1;position:relative}
+  #nwmap{width:100%;height:100%}
+  .sidebar{width:260px;flex-shrink:0;border-left:0.5px solid var(--bdr);overflow-y:auto;background:var(--bg)}
+  .sb-sec{padding:12px;border-bottom:0.5px solid var(--bdr)}
+  .sb-ttl{font-size:10px;font-weight:600;color:var(--txt3);letter-spacing:.07em;text-transform:uppercase;margin-bottom:8px}
+  .nw-sel{width:100%;padding:6px 8px;font-size:12px;background:var(--bg2);border:0.5px solid var(--bdr2);border-radius:8px;color:var(--txt);font-family:inherit;cursor:pointer;margin-bottom:6px}
+  .dest-row{display:flex;gap:6px}
+  .dest-inp{flex:1;padding:6px 8px;font-size:12px;background:var(--bg2);border:0.5px solid var(--bdr2);border-radius:8px;color:var(--txt);font-family:inherit}
+  .dest-res{margin-top:8px;font-size:12px;line-height:1.45;color:var(--txt2)}
+  .dest-list{margin-top:8px;display:flex;flex-direction:column;gap:6px;max-height:170px;overflow:auto}
+  .dest-item{padding:7px 8px;border:0.5px solid var(--bdr);border-radius:8px;background:var(--bg2);font-size:12px;color:var(--txt);cursor:pointer;text-align:left}
+  .dest-item:hover{background:var(--bg3)}
+  .leg-row{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--txt2);margin-bottom:5px}
+  .leg-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+  .t-stat{display:flex;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--bdr);font-size:12px}
+  .t-stat:last-child{border-bottom:none}
+  .t-lbl{color:var(--txt2)}.t-val{font-family:monospace;font-weight:600}
+  .sig-bar{height:3px;border-radius:2px;background:var(--bg3);margin-top:4px;overflow:hidden}
+  .sig-fill{height:100%;border-radius:2px;transition:width .4s}
+
+  /* ── ANALYTICS ── */
+  #p-analytics{flex-wrap:wrap;padding:14px;gap:12px;align-content:flex-start;overflow-y:auto}
+  .cc{background:var(--bg);border:0.5px solid var(--bdr);border-radius:12px;padding:12px}
+  .cc.f{width:100%}.cc.h{width:calc(50% - 6px)}
+  .cc-ttl{font-size:11px;color:var(--txt2);margin-bottom:10px}
+
+  /* ── DATA LOG ── */
+  #p-datalog{flex-direction:column}
+  .dl-bar{padding:9px 14px;display:flex;align-items:center;gap:10px;border-bottom:0.5px solid var(--bdr);background:var(--bg2);flex-shrink:0}
+  .rec-cnt{font-size:12px;font-family:monospace;background:#e6f1fb;color:#185fa5;padding:3px 10px;border-radius:12px}
+  .nbtn{padding:6px 12px;font-size:12px;border:0.5px solid var(--bdr2);border-radius:8px;background:var(--bg2);color:var(--txt);cursor:pointer;font-family:inherit}
+  .nbtn:hover{background:var(--bg)}
+  .tw{flex:1;overflow:auto}
+  table.nt{width:100%;border-collapse:collapse;font-size:12px}
+  .nt thead{position:sticky;top:0;background:var(--bg2);z-index:5}
+  .nt th{padding:7px 12px;text-align:left;font-size:11px;font-weight:600;color:var(--txt2);border-bottom:0.5px solid var(--bdr);white-space:nowrap}
+  .nt td{padding:6px 12px;border-bottom:0.5px solid var(--bdr);font-family:monospace;white-space:nowrap}
+  .nt tr:hover td{background:var(--bg2)}
+  .nbadge{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;font-family:inherit}
+
+  /* ── PATTERNS ── */
+  #p-patterns{flex-wrap:wrap;padding:14px;gap:12px;align-content:flex-start;overflow-y:auto}
+  .ic{background:var(--bg);border:0.5px solid var(--bdr);border-radius:12px;padding:14px}
+  .ic.h{width:calc(50% - 6px)}.ic.f{width:100%}
+  .mg{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .mb{background:var(--bg2);border-radius:8px;padding:12px;text-align:center}
+  .mn{font-size:22px;font-weight:600;font-family:monospace}
+  .ms{font-size:11px;color:var(--txt2);margin-top:2px}
+  .ri{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+  .rn{font-size:12px;color:var(--txt2);width:22px}
+  .rnm{flex:1;font-size:13px;font-weight:600}
+  .rbw{width:80px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden}
+  .rb{height:100%;border-radius:2px}
+  .rv{font-family:monospace;font-size:12px;color:var(--txt2);width:60px;text-align:right}
+  .an{display:flex;gap:10px;padding:10px;background:var(--bg2);border-radius:8px;border-left:3px solid;margin-bottom:8px;font-size:12px;line-height:1.5}
+  .an.w{border-color:var(--amber)}.an.g{border-color:var(--green)}.an.c{border-color:var(--red)}
+  .an-ic{flex-shrink:0;margin-top:1px;width:16px;text-align:center;font-weight:700}
+  #p-outages{flex-direction:column;overflow:hidden}
+  .out-wrap{display:flex;flex-direction:column;height:100%}
+  .out-bar{padding:9px 14px;display:flex;align-items:center;gap:10px;border-bottom:0.5px solid var(--bdr);background:var(--bg2);flex-shrink:0}
+  .out-grid{padding:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;border-bottom:0.5px solid var(--bdr);background:var(--bg)}
+  .out-card{background:var(--bg2);border:0.5px solid var(--bdr);border-radius:10px;padding:10px}
+  .out-l{font-size:11px;color:var(--txt2)}
+  .out-v{margin-top:4px;font-size:18px;font-weight:600;font-family:monospace}
+  .out-main{display:grid;grid-template-columns:1.2fr .8fr;gap:12px;flex:1;padding:12px;min-height:0}
+  .out-panel{background:var(--bg);border:0.5px solid var(--bdr);border-radius:12px;padding:10px;min-height:0;display:flex;flex-direction:column}
+  .out-title{font-size:11px;color:var(--txt2);margin-bottom:8px}
+  .out-scroll{overflow:auto;flex:1}
+  .out-table{width:100%;border-collapse:collapse;font-size:12px}
+  .out-table th,.out-table td{padding:7px;border-bottom:0.5px solid var(--bdr);text-align:left;white-space:nowrap}
+  .sev{font-weight:600}
+  .sev.g{color:#1D9E75}.sev.a{color:#BA7517}.sev.r{color:#A32D2D}
+  .sig-b{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600}
+
+  /* ── SPEED TEST ── */
+  #p-speedtest{flex-direction:column;overflow-y:auto;background:var(--bg2)}
+  .st-wrap{display:flex;flex-direction:column;align-items:center;padding:20px 16px;gap:18px;max-width:900px;margin:0 auto;width:100%}
+  .st-gauges{display:flex;gap:24px;align-items:flex-end;justify-content:center;flex-wrap:wrap}
+  .gauge-box{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .gauge-lbl{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--txt2)}
+  .gauge-sub{font-size:13px;color:var(--txt2);font-family:monospace}
+  .st-server{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
+  .srv-sel{padding:7px 12px;font-size:12px;background:var(--bg);border:0.5px solid var(--bdr2);border-radius:8px;color:var(--txt);font-family:inherit;cursor:pointer;min-width:180px}
+  .run-btn{padding:9px 28px;font-size:13px;font-weight:600;background:var(--green);color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:inherit;transition:background .15s,transform .1s}
+  .run-btn:hover{background:#0f6e56}.run-btn:active{transform:scale(.97)}
+  .run-btn:disabled{background:var(--bg3);color:var(--txt2);cursor:not-allowed}
+  .st-phase{font-size:12px;color:var(--txt2);height:18px;text-align:center}
+  .st-results{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:100%}
+  .sr{background:var(--bg);border:0.5px solid var(--bdr);border-radius:12px;padding:12px 10px;text-align:center}
+  .sr-ic{font-size:20px;margin-bottom:4px}
+  .sr-v{font-size:22px;font-weight:600;font-family:monospace}
+  .sr-u{font-size:11px;color:var(--txt2)}.sr-l{font-size:11px;color:var(--txt2);margin-top:2px}
+  .st-history{width:100%;background:var(--bg);border:0.5px solid var(--bdr);border-radius:12px;padding:12px}
+  .sh-ttl{font-size:11px;color:var(--txt2);margin-bottom:10px}
+  .sh-rows{display:flex;flex-direction:column;gap:6px;max-height:130px;overflow-y:auto}
+  .sh-row{display:flex;align-items:center;gap:10px;font-size:12px;padding:6px 8px;background:var(--bg2);border-radius:8px}
+  .sh-time{color:var(--txt2);width:70px;flex-shrink:0;font-family:monospace}
+  .sh-srv{flex:1}.sh-val{font-family:monospace;font-weight:600;width:70px;text-align:right}
+  .sh-rt{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600;white-space:nowrap}
+
+  ::-webkit-scrollbar{width:4px;height:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:2px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="logo"><div class="live-dot"></div>NetWatch NG</div>
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-l">Avg signal</div><div class="kpi-v" id="k-sig">—</div></div>
+    <div class="kpi"><div class="kpi-l">Towers</div><div class="kpi-v" id="k-twr">—</div></div>
+    <div class="kpi"><div class="kpi-l">Avg latency</div><div class="kpi-v" id="k-lat">—</div></div>
+    <div class="kpi"><div class="kpi-l">Avg speed</div><div class="kpi-v" id="k-spd">—</div></div>
+    <div class="kpi"><div class="kpi-l">Records</div><div class="kpi-v" id="k-rec">0</div></div>
+    <div class="kpi"><div class="kpi-l">4G+/5G</div><div class="kpi-v" id="k-4g">—</div></div>
+  </div>
+  <div id="api-badge" class="api-status api-err">⚡ Connecting…</div>
+</div>
+
+<div class="tabs">
+  <button class="tab on"  onclick="sw('map',this)">Map view</button>
+  <button class="tab"     onclick="sw('analytics',this)">Analytics</button>
+  <button class="tab"     onclick="sw('datalog',this)">Data log</button>
+  <button class="tab"     onclick="sw('patterns',this)">Patterns</button>
+  <button class="tab"     onclick="sw('outages',this)">Outages</button>
+  <button class="tab"     onclick="sw('speedtest',this)">Speed test</button>
+</div>
+
+<div class="content">
+
+  <!-- MAP -->
+  <div id="p-map" class="panel on">
+    <div class="map-wrap"><div id="nwmap"></div></div>
+    <div class="sidebar">
+      <div class="sb-sec">
+        <div class="sb-ttl">Filters</div>
+        <select class="nw-sel" id="fp" onchange="applyF()">
+          <option value="all">All providers</option>
+          <option>MTN</option><option>Airtel</option><option>Glo</option><option>9mobile</option>
+        </select>
+        <select class="nw-sel" id="fn" onchange="applyF()">
+          <option value="all">All network types</option>
+          <option>5G</option><option>4G</option><option>3G</option><option>2G</option>
+        </select>
+        <select class="nw-sel" id="fs" onchange="applyF()">
+          <option value="all">All signal levels</option>
+          <option>excellent</option><option>good</option><option>fair</option><option>poor</option>
+        </select>
+        <select class="nw-sel" id="map-style" onchange="setMapStyle(this.value)">
+          <option value="standard">Map style: Standard</option>
+          <option value="earth">Map style: Earth (satellite)</option>
+          <option value="roads">Map style: Roads</option>
+        </select>
+      </div>
+      <div class="sb-sec">
+        <div class="sb-ttl">Best provider by destination</div>
+        <div class="dest-row">
+          <input id="dest-q" class="dest-inp" type="text" placeholder="Search place, restaurant, school, village...">
+          <button class="nbtn" onclick="searchPlaces()">Search</button>
+        </div>
+        <div id="dest-list" class="dest-list"></div>
+        <div style="margin-top:6px">
+          <button class="nbtn" onclick="runDestinationCheck()">Get best provider</button>
+        </div>
+        <div id="dest-res" class="dest-res">Enter a destination to see top providers nearby.</div>
+      </div>
+      <div class="sb-sec">
+        <div class="sb-ttl">Legend</div>
+        <div class="leg-row"><div class="leg-dot" style="background:#1D9E75"></div>Excellent (&gt;−70 dBm)</div>
+        <div class="leg-row"><div class="leg-dot" style="background:#185FA5"></div>Good (−70 to −85)</div>
+        <div class="leg-row"><div class="leg-dot" style="background:#BA7517"></div>Fair (−85 to −100)</div>
+        <div class="leg-row"><div class="leg-dot" style="background:#A32D2D"></div>Poor (&lt;−100 dBm)</div>
+      </div>
+      <div class="sb-sec" id="twr-det">
+        <div class="sb-ttl">Selected tower</div>
+        <div style="font-size:12px;color:var(--txt2)">Click a marker on the map</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ANALYTICS -->
+  <div id="p-analytics" class="panel">
+    <div class="cc f"><div class="cc-ttl">Signal strength over time (dBm) — by provider</div><canvas id="c-tl" height="72"></canvas></div>
+    <div class="cc h"><div class="cc-ttl">Average download speed by provider (Mbps)</div><canvas id="c-spd" height="160"></canvas></div>
+    <div class="cc h"><div class="cc-ttl">Network type distribution</div><canvas id="c-net" height="160"></canvas></div>
+    <div class="cc h"><div class="cc-ttl">Average latency by city (ms)</div><canvas id="c-lat" height="160"></canvas></div>
+    <div class="cc h"><div class="cc-ttl">Signal quality distribution</div><canvas id="c-sig" height="160"></canvas></div>
+  </div>
+
+  <!-- DATA LOG -->
+  <div id="p-datalog" class="panel">
+    <div class="dl-bar">
+      <span style="font-size:12px;color:var(--txt2)">Records</span>
+      <span class="rec-cnt" id="rc">0</span>
+      <div style="flex:1"></div>
+      <button class="nbtn" onclick="doExport()">Export CSV</button>
+      <button class="nbtn" onclick="doClear()">Clear log</button>
+    </div>
+    <div class="tw"><table class="nt"><thead><tr>
+      <th>#</th><th>Time</th><th>City</th><th>Tower ID</th><th>Provider</th><th>Network</th>
+      <th>Signal (dBm)</th><th>Latency (ms)</th><th>DL (Mbps)</th><th>UL (Mbps)</th><th>RSRP</th><th>RSRQ</th>
+    </tr></thead><tbody id="ltb"></tbody></table></div>
+  </div>
+
+  <!-- PATTERNS -->
+  <div id="p-patterns" class="panel">
+    <div class="ic f">
+      <div class="sb-ttl">System overview</div>
+      <div class="mg">
+        <div class="mb"><div class="mn" id="pt">0</div><div class="ms">Total readings</div></div>
+        <div class="mb"><div class="mn" id="ps">—</div><div class="ms">Avg signal (dBm)</div></div>
+        <div class="mb"><div class="mn" id="pl">—</div><div class="ms">Avg latency (ms)</div></div>
+        <div class="mb"><div class="mn" id="pp">—</div><div class="ms">Avg speed (Mbps)</div></div>
+      </div>
+    </div>
+    <div class="ic h"><div class="sb-ttl">Provider performance ranking</div><div id="pr-rank"></div></div>
+    <div class="ic h"><div class="sb-ttl">City coverage ranking</div><div id="city-rank"></div></div>
+    <div class="ic f"><div class="sb-ttl">Detected patterns & anomalies</div><div id="anoms"></div></div>
+  </div>
+
+  <!-- OUTAGES -->
+  <div id="p-outages" class="panel">
+    <div class="out-wrap">
+      <div class="out-bar">
+        <span style="font-size:12px;color:var(--txt2)">IODA outage monitoring (Nigeria + operators)</span>
+        <div style="flex:1"></div>
+        <button class="nbtn" id="out-sync-btn" onclick="syncOutagesNow()">Sync now</button>
+      </div>
+      <div class="out-grid">
+        <div class="out-card"><div class="out-l">Total outages recorded</div><div class="out-v" id="out-total">0</div></div>
+        <div class="out-card"><div class="out-l">Most affected operator</div><div class="out-v" id="out-most">-</div></div>
+        <div class="out-card"><div class="out-l">Average outage duration</div><div class="out-v" id="out-avgdur">0 min</div></div>
+        <div class="out-card"><div class="out-l">Last outage detected</div><div class="out-v" id="out-last">-</div></div>
+      </div>
+      <div class="out-main">
+        <div class="out-panel">
+          <div class="out-title">Outage timeline severity (last 30 days)</div>
+          <canvas id="c-out-tl" height="120"></canvas>
+          <div class="out-title" style="margin-top:10px">Outage list</div>
+          <div class="out-scroll">
+            <table class="out-table">
+              <thead><tr><th>Operator</th><th>Signal</th><th>Severity</th><th>Started</th><th>Duration</th><th>Status</th></tr></thead>
+              <tbody id="out-tb"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="out-panel">
+          <div class="out-title">What readings look like before an outage</div>
+          <canvas id="c-out-pre" height="120"></canvas>
+          <div class="out-scroll" id="out-pre-list" style="margin-top:10px;font-size:12px;color:var(--txt2)"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SPEED TEST -->
+  <div id="p-speedtest" class="panel">
+    <div class="st-wrap">
+      <div class="st-gauges">
+        <div class="gauge-box">
+          <div class="gauge-lbl">Download</div>
+          <canvas id="g-dl" width="220" height="130"></canvas>
+          <div class="gauge-sub" id="g-dl-val">— Mbps</div>
+        </div>
+        <div class="gauge-box" style="margin-bottom:18px">
+          <canvas id="g-ping" width="150" height="90"></canvas>
+          <div class="gauge-sub" id="g-ping-val">— ms</div>
+          <div style="font-size:10px;color:var(--txt2);letter-spacing:.06em;text-transform:uppercase;margin-top:2px">Ping</div>
+        </div>
+        <div class="gauge-box">
+          <div class="gauge-lbl">Upload</div>
+          <canvas id="g-ul" width="220" height="130"></canvas>
+          <div class="gauge-sub" id="g-ul-val">— Mbps</div>
+        </div>
+      </div>
+      <div class="st-phase" id="st-phase">Select a server and press Run</div>
+      <div class="st-server">
+        <button class="run-btn" id="run-btn" onclick="runTest()">Run test</button>
+      </div>
+      <div class="st-results">
+        <div class="sr"><div class="sr-ic" style="color:#1D9E75">↓</div><div class="sr-v" id="r-dl">—</div><div class="sr-u">Mbps</div><div class="sr-l">Download</div></div>
+        <div class="sr"><div class="sr-ic" style="color:#185FA5">↑</div><div class="sr-v" id="r-ul">—</div><div class="sr-u">Mbps</div><div class="sr-l">Upload</div></div>
+        <div class="sr"><div class="sr-ic" style="color:#BA7517">◎</div><div class="sr-v" id="r-ping">—</div><div class="sr-u">ms</div><div class="sr-l">Ping</div></div>
+        <div class="sr"><div class="sr-ic" style="color:#534AB7">~</div><div class="sr-v" id="r-jit">—</div><div class="sr-u">ms</div><div class="sr-l">Jitter</div></div>
+      </div>
+      <div class="st-history">
+        <div class="sh-ttl">Recent tests</div>
+        <div class="sh-rows" id="sh-rows"><div style="font-size:12px;color:var(--txt2);padding:4px 8px">No tests run yet</div></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /content -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════════
+const API = (
+  window.NETWATCH_API_BASE ||
+  (window.location.protocol === 'file:' ? 'http://localhost:3001/api' : `${window.location.origin}/api`)
+).replace(/\/+$/, '');
+const SIMULATION_ON = new URLSearchParams(window.location.search).get('sim') !== 'off';
+const PC_COLORS = ['#1D9E75','#185FA5','#BA7517','#A32D2D'];
+const PROVIDERS = ['MTN','Airtel','Glo','9mobile'];
+const CITIES = [
+  {n:'Lagos',la:6.5244,lo:3.3792},{n:'Abuja',la:9.0765,lo:7.3986},
+  {n:'Kano',la:12.002,lo:8.592},{n:'Port Harcourt',la:4.8156,lo:7.0498},
+  {n:'Ibadan',la:7.3775,lo:3.947},{n:'Kaduna',la:10.522,lo:7.438},
+  {n:'Enugu',la:6.4584,lo:7.546},{n:'Benin City',la:6.335,lo:5.604},
+  {n:'Maiduguri',la:11.833,lo:13.15},{n:'Jos',la:9.8965,lo:8.858},
+  {n:'Warri',la:5.5167,lo:5.75},{n:'Aba',la:5.1066,lo:7.367},
+  {n:'Ilorin',la:8.4966,lo:4.542},{n:'Uyo',la:5.0481,lo:7.924},
+];
+
+// ═══════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════
+const isDark = () => window.matchMedia('(prefers-color-scheme:dark)').matches;
+function sigCl(d){return d>-70?'#1D9E75':d>-85?'#185FA5':d>-100?'#BA7517':'#A32D2D'}
+function sigLv(d){return d>-70?'excellent':d>-85?'good':d>-100?'fair':'poor'}
+function rn(){return Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random())}
+
+// ═══════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════
+let TOWERS=[], TL={}, DB=[], rid=0;
+let map, TM={};
+let CELL_TO_TOWER = {};
+const seenReadingKeys = new Set();
+let mapLayers = {};
+let activeBaseLayer = null;
+let destinationMarker = null;
+let searchPlaceMarkers = null;
+let selectedPlace = null;
+let towerCoverageCircle = null;
+let selectedTowerId = null;
+
+// ═══════════════════════════════════════════════════════════
+//  API HEALTH CHECK
+// ═══════════════════════════════════════════════════════════
+async function checkAPI(){
+  const badge = document.getElementById('api-badge');
+  try {
+    const res = await fetch(`${API}/health`);
+    const data = await res.json();
+    if(data.status==='ok'){
+      badge.className='api-status api-ok';
+      badge.textContent=`✅ API connected — ${Number(data.towers_in_db).toLocaleString()} towers`;
+      return true;
+    }
+  } catch(e){}
+  badge.className='api-status api-err';
+  badge.textContent='❌ API offline — using simulation';
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  LOAD TOWERS FROM DB
+// ═══════════════════════════════════════════════════════════
+async function loadTowers(){
+  try {
+    const res  = await fetch(`${API}/towers?limit=3000`);
+    const data = await res.json();
+    TOWERS = data.towers.map(t=>({
+      id:    t.id,
+      cid:   t.cell_id,
+      city:  t.city,
+      prov:  t.operator,
+      la:    parseFloat(t.lat),
+      lo:    parseFloat(t.lon),
+      range_m: parseInt(t.range_m, 10) || 0,
+      net:   t.network,
+      sb:    t.average_signal || -85,
+      np:    [t.network],
+    }));
+    CELL_TO_TOWER = {};
+    TOWERS.forEach(t => { if (t.cid) CELL_TO_TOWER[String(t.cid)] = t.id; });
+    document.getElementById('k-twr').textContent = TOWERS.length.toLocaleString();
+    console.log(`Loaded ${TOWERS.length} towers from DB`);
+  } catch(e){
+    console.warn('Could not load towers from API, using built-in simulation');
+    generateFallbackTowers();
+  }
+}
+
+// Fallback if server is not running
+function generateFallbackTowers(){
+  const PC={MTN:{b:-72,np:['5G','4G','4G','4G','3G']},Airtel:{b:-75,np:['5G','4G','4G','3G','3G']},Glo:{b:-79,np:['4G','4G','3G','3G','2G']},'9mobile':{b:-83,np:['4G','3G','3G','2G','2G']}};
+  let tid=1;
+  CITIES.forEach(c=>PROVIDERS.forEach(p=>{
+    const cfg=PC[p],n=Math.max(2,Math.round((c.w||1)*2)),sp=.08;
+    for(let i=0;i<n;i++) TOWERS.push({id:tid++,cid:tid,city:c.n,prov:p,la:c.la+(Math.random()-.5)*sp,lo:c.lo+(Math.random()-.5)*sp,sb:cfg.b+(Math.random()-.5)*5,np:cfg.np,net:cfg.np[0]});
+  }));
+  CELL_TO_TOWER = {};
+  TOWERS.forEach(t => { if (t.cid) CELL_TO_TOWER[String(t.cid)] = t.id; });
+  document.getElementById('k-twr').textContent=TOWERS.length;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SIMULATE READINGS (based on real tower positions)
+// ═══════════════════════════════════════════════════════════
+function genReading(t){
+  const h=new Date().getHours(), pk=((h>=8&&h<=10)||(h>=12&&h<=14)||(h>=18&&h<=20))?7:0;
+  const baseSig = t.sb && t.sb!==0 ? t.sb : -85;
+  const sig = Math.max(-110, Math.min(-50, baseSig + rn()*7 - pk));
+  const net = t.np ? t.np[Math.floor(Math.random()*t.np.length)] : t.net || '4G';
+  const sf  = Math.max(0,(sig+110)/60);
+  const sm  = net==='5G'?3:net==='4G'?1:net==='3G'?.25:.05;
+  const dl  = Math.round(Math.max(.1,sm*30*sf*(.6+Math.random()*.8))*10)/10;
+  const ul  = Math.round(dl*(.2+Math.random()*.3)*10)/10;
+  const lat = Math.round(Math.max(10,200-sf*160+rn()*12+pk*2));
+  return {
+    id:         ++rid,
+    ts:         new Date().toISOString(),
+    tower_id:   t.id,
+    cell_id:    t.cid || 0,
+    city:       t.city,
+    operator:   t.prov,
+    network:    net,
+    signal_dbm: Math.round(sig*10)/10,
+    latency_ms: lat,
+    dl_mbps:    dl,
+    ul_mbps:    ul,
+    rsrp:       Math.round((sig-4+rn()*2)*10)/10,
+    rsrq:       Math.round((-15+sf*9+rn()*2)*10)/10,
+  };
+}
+
+// Persist readings to DB every 15 seconds
+let readingsBuf=[];
+async function flushReadings(){
+  if(!readingsBuf.length) return;
+  const batch = readingsBuf.splice(0, readingsBuf.length);
+  try {
+    await fetch(`${API}/readings`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({readings:batch})
+    });
+  } catch(e){} // silent fail — data lives in memory regardless
+}
+
+function ingestExternalReadings(rows){
+  rows.forEach((raw)=>{
+    const ts = raw.recorded_at || raw.ts || new Date().toISOString();
+    const towerId = raw.tower_id || CELL_TO_TOWER[String(raw.cell_id || '')] || null;
+    const key = `${towerId || 0}:${raw.cell_id || 0}:${ts}`;
+    if (seenReadingKeys.has(key)) return;
+    seenReadingKeys.add(key);
+
+    const r = {
+      id: ++rid,
+      ts,
+      tower_id: towerId,
+      cell_id: raw.cell_id || 0,
+      city: raw.city || 'Unknown',
+      operator: raw.operator || 'Unknown',
+      network: raw.network || '4G',
+      signal_dbm: Number(raw.signal_dbm ?? -95),
+      latency_ms: Number(raw.latency_ms ?? 0),
+      dl_mbps: Number(raw.dl_mbps ?? 0),
+      ul_mbps: Number(raw.ul_mbps ?? 0),
+      rsrp: Number(raw.rsrp ?? 0),
+      rsrq: Number(raw.rsrq ?? 0),
+    };
+
+    DB.push(r);
+    if (r.tower_id) TL[r.tower_id] = r;
+    addLog(r);
+  });
+
+  if (DB.length > 4000) DB.splice(0, DB.length - 4000);
+  updKPIs();
+  updMap();
+  applyF();
+}
+
+async function syncLatestReadings(){
+  try {
+    const res = await fetch(`${API}/readings/latest?limit=1200`);
+    if(!res.ok) return;
+    const data = await res.json();
+    if (!Array.isArray(data.readings) || !data.readings.length) return;
+    const ordered = [...data.readings].sort((a,b)=>new Date(a.recorded_at) - new Date(b.recorded_at));
+    ingestExternalReadings(ordered);
+  } catch(e){}
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MAP
+// ═══════════════════════════════════════════════════════════
+function initMap(){
+  map = L.map('nwmap',{center:[9.08,8.68],zoom:6});
+  mapLayers = {
+    standard: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+      attribution:'&copy; OpenStreetMap contributors',
+      opacity:.75,
+      maxZoom:19
+    }),
+    earth: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+      attribution:'Tiles &copy; Esri',
+      maxZoom:19
+    }),
+    roads: L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{
+      attribution:'&copy; OpenStreetMap contributors &copy; CARTO',
+      maxZoom:20
+    }),
+  };
+  setMapStyle('standard');
+  TOWERS.forEach(t=>{
+    const m = L.circleMarker([t.la,t.lo],{radius:4,fillColor:'#888',color:'#fff',weight:1,fillOpacity:.8}).addTo(map);
+    m.bindTooltip('', { direction:'top', sticky:true, opacity:0.95, className:'nw-tt' });
+    m.on('mouseover', ()=>{
+      m.setTooltipContent(getTowerHoverHtml(t));
+      m.openTooltip();
+    });
+    m.on('mouseout', ()=>m.closeTooltip());
+    m.on('click',()=>showTD(t));
+    TM[t.id]=m;
+  });
+}
+
+function getTowerHoverHtml(t){
+  const d = TL[t.id];
+  if(!d){
+    return `<div style="font-size:12px"><strong>${t.prov || 'Unknown'}</strong><br>Cell ID: ${t.cid || 'n/a'}<br>No live readings yet</div>`;
+  }
+  return `<div style="font-size:12px;line-height:1.4">
+    <strong>${d.operator || t.prov || 'Unknown'}</strong><br>
+    Cell ID: ${d.cell_id || t.cid || 'n/a'}<br>
+    Network: ${d.network || t.net || 'n/a'}<br>
+    Signal: ${d.signal_dbm} dBm<br>
+    Latency: ${d.latency_ms} ms<br>
+    DL/UL: ${d.dl_mbps} / ${d.ul_mbps} Mbps
+  </div>`;
+}
+
+function setMapStyle(style){
+  const next = mapLayers[style] || mapLayers.standard;
+  if(!map || !next) return;
+  if(activeBaseLayer && map.hasLayer(activeBaseLayer)) map.removeLayer(activeBaseLayer);
+  next.addTo(map);
+  activeBaseLayer = next;
+}
+
+function placeTypeLabel(row){
+  const cls = (row.class || '').trim();
+  const typ = (row.type || '').trim();
+  if(cls && typ) return `${cls} / ${typ}`;
+  return cls || typ || 'location';
+}
+
+function clearPlaceResults(){
+  if(searchPlaceMarkers) searchPlaceMarkers.clearLayers();
+  document.getElementById('dest-list').innerHTML = '';
+}
+
+function focusPlace(place){
+  selectedPlace = place;
+  map.setView([place.lat, place.lon], 14);
+  if(destinationMarker && map.hasLayer(destinationMarker)) map.removeLayer(destinationMarker);
+  destinationMarker = L.circleMarker([place.lat, place.lon], {
+    radius: 8, color: '#534AB7', fillColor: '#534AB7', fillOpacity: .25, weight: 2
+  }).addTo(map);
+  destinationMarker.bindPopup(`Destination: ${place.label}`).openPopup();
+}
+
+function renderPlaceResults(rows){
+  const list = document.getElementById('dest-list');
+  list.innerHTML = '';
+  if(!rows.length){
+    list.innerHTML = '<div style="font-size:12px;color:var(--txt2)">No places found.</div>';
+    return;
+  }
+
+  rows.forEach((row, i) => {
+    const lat = parseFloat(row.lat), lon = parseFloat(row.lon);
+    if(!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const label = row.display_name || row.name || 'Unnamed location';
+    const type = placeTypeLabel(row);
+    const place = { lat, lon, label, type };
+
+    const btn = document.createElement('button');
+    btn.className = 'dest-item';
+    btn.innerHTML = `<strong>${i+1}. ${label.split(',')[0]}</strong><div style="color:var(--txt2);margin-top:3px">${type}</div>`;
+    btn.onclick = () => focusPlace(place);
+    list.appendChild(btn);
+
+    const marker = L.circleMarker([lat, lon], {
+      radius: 5, color: '#185FA5', fillColor: '#185FA5', fillOpacity: .45, weight: 1.5
+    }).addTo(searchPlaceMarkers);
+    marker.bindPopup(`${label}<br><small>${type}</small>`);
+    marker.on('click', () => focusPlace(place));
+  });
+}
+
+async function searchPlaces(){
+  const out = document.getElementById('dest-res');
+  const query = document.getElementById('dest-q').value.trim();
+  selectedPlace = null;
+  if(!query){
+    out.textContent = 'Enter a place name first.';
+    clearPlaceResults();
+    return;
+  }
+
+  out.textContent = 'Searching places...';
+  clearPlaceResults();
+  try{
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=ng&limit=10&q=${encodeURIComponent(query)}`;
+    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if(!res.ok) throw new Error('Place search unavailable right now.');
+    const rows = await res.json();
+    renderPlaceResults(rows);
+    const firstValid = rows.find(r => Number.isFinite(parseFloat(r.lat)) && Number.isFinite(parseFloat(r.lon)));
+    if(firstValid){
+      focusPlace({
+        lat: parseFloat(firstValid.lat),
+        lon: parseFloat(firstValid.lon),
+        label: firstValid.display_name || query,
+        type: placeTypeLabel(firstValid)
+      });
+      out.textContent = `Found ${rows.length} result(s). Destination set. Click "Get best provider".`;
+    } else {
+      out.textContent = 'No places found for that query.';
+    }
+  }catch(e){
+    out.textContent = e.message || 'Could not search places.';
+  }
+}
+
+async function geocodeDestination(query){
+  const q = (query || '').trim();
+  if(!q) throw new Error('Please enter a destination.');
+
+  const cityMatch = CITIES.find(c => c.n.toLowerCase() === q.toLowerCase());
+  if(cityMatch) return { lat: cityMatch.la, lon: cityMatch.lo, label: cityMatch.n };
+
+  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q + ', Nigeria')}`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if(!res.ok) throw new Error('Could not search destination right now.');
+  const rows = await res.json();
+  if(!rows.length) throw new Error('Destination not found.');
+  return {
+    lat: parseFloat(rows[0].lat),
+    lon: parseFloat(rows[0].lon),
+    label: rows[0].display_name || q
+  };
+}
+
+function renderRecommendationResult(data, label){
+  const el = document.getElementById('dest-res');
+  if(!data.providers || !data.providers.length){
+    el.innerHTML = `<div>No provider data found near <strong>${label}</strong>.</div>`;
+    return;
+  }
+  const top = data.providers.slice(0, 3);
+  el.innerHTML = `
+    <div><strong>Destination:</strong> ${label}</div>
+    <div><strong>Confidence:</strong> ${data.confidence}</div>
+    ${top.map((p, i) => `<div style="margin-top:5px"><strong>#${i+1} ${p.operator}</strong> — score ${p.score} | ${p.avg_signal} dBm | ${p.avg_latency} ms | ${p.avg_dl} Mbps</div>`).join('')}
+  `;
+}
+
+async function runDestinationCheck(){
+  const out = document.getElementById('dest-res');
+  const query = document.getElementById('dest-q').value;
+  out.textContent = 'Checking destination...';
+  try{
+    const loc = selectedPlace || await geocodeDestination(query);
+    focusPlace(loc);
+
+    const recRes = await fetch(`${API}/recommendation?lat=${loc.lat}&lon=${loc.lon}&radius_km=5&hours=24`);
+    if(!recRes.ok) throw new Error('Could not calculate recommendation.');
+    const recData = await recRes.json();
+    renderRecommendationResult(recData, loc.label);
+  }catch(e){
+    out.textContent = e.message || 'Could not complete destination check.';
+  }
+}
+
+function updMap(){
+  TOWERS.forEach(t=>{
+    const d=TL[t.id]; if(!d) return;
+    const c=sigCl(d.signal_dbm), r=d.network==='5G'?7:d.network==='4G'?5:4;
+    TM[t.id]?.setStyle({fillColor:c,color:c,radius:r,fillOpacity:.85});
+  });
+}
+
+function showTD(t){
+  const d=TL[t.id], el=document.getElementById('twr-det');
+  const isSameTower = selectedTowerId === t.id;
+  if(isSameTower && towerCoverageCircle && map.hasLayer(towerCoverageCircle)){
+    map.removeLayer(towerCoverageCircle);
+    towerCoverageCircle = null;
+    selectedTowerId = null;
+    el.innerHTML=`<div class="sb-ttl">Selected tower</div><div style="font-size:12px;color:var(--txt2)">Click a marker on the map</div>`;
+    return;
+  }
+
+  selectedTowerId = t.id;
+  drawTowerCoverage(t, d);
+  if(!d){el.innerHTML=`<div class="sb-ttl">Tower ${t.id}</div><div style="font-size:12px;color:var(--txt2)">No readings yet</div>`;return}
+  const c=sigCl(d.signal_dbm), pct=Math.round((d.signal_dbm+110)/60*100);
+  el.innerHTML=`<div class="sb-ttl">Tower ${t.id} — ${t.city}</div>
+  <div class="t-stat"><span class="t-lbl">Cell ID</span><span class="t-val">${t.cid}</span></div>
+  <div class="t-stat"><span class="t-lbl">Provider</span><span class="t-val">${d.operator}</span></div>
+  <div class="t-stat"><span class="t-lbl">Network</span><span class="t-val">${d.network}</span></div>
+  <div class="t-stat"><span class="t-lbl">Signal</span><span class="t-val" style="color:${c}">${d.signal_dbm} dBm</span></div>
+  <div class="sig-bar"><div class="sig-fill" style="width:${pct}%;background:${c}"></div></div>
+  <div class="t-stat"><span class="t-lbl">Latency</span><span class="t-val">${d.latency_ms} ms</span></div>
+  <div class="t-stat"><span class="t-lbl">DL</span><span class="t-val">${d.dl_mbps} Mbps</span></div>
+  <div class="t-stat"><span class="t-lbl">UL</span><span class="t-val">${d.ul_mbps} Mbps</span></div>
+  <div class="t-stat"><span class="t-lbl">RSRP</span><span class="t-val">${d.rsrp} dBm</span></div>
+  <div class="t-stat"><span class="t-lbl">RSRQ</span><span class="t-val">${d.rsrq} dB</span></div>`;
+}
+
+function drawTowerCoverage(t, reading){
+  if(!map) return;
+  if(towerCoverageCircle && map.hasLayer(towerCoverageCircle)) map.removeLayer(towerCoverageCircle);
+
+  const radius = t.range_m && t.range_m > 0 ? t.range_m : 500;
+  const color = reading ? sigCl(reading.signal_dbm) : '#888';
+  towerCoverageCircle = L.circle([t.la, t.lo], {
+    radius,
+    color,
+    weight: 1.5,
+    opacity: 0.75,
+    fillColor: color,
+    fillOpacity: 0.12
+  }).addTo(map);
+}
+
+function applyF(){
+  const fp=document.getElementById('fp').value, fn=document.getElementById('fn').value, fs=document.getElementById('fs').value;
+  TOWERS.forEach(t=>{
+    const d=TL[t.id]; let show=true;
+    if(fp!=='all'&&t.prov!==fp)show=false;
+    if(fn!=='all'&&d&&d.network!==fn)show=false;
+    if(fs!=='all'&&d&&sigLv(d.signal_dbm)!==fs)show=false;
+    const m=TM[t.id];
+    if(show&&m&&!map.hasLayer(m))m.addTo(map);
+    else if(!show&&m&&map.hasLayer(m))map.removeLayer(m);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+//  CHARTS
+// ═══════════════════════════════════════════════════════════
+let charts={};
+let OUTAGES = [];
+let OUTAGE_CORR = [];
+function initCharts(){
+  const dark=isDark(), tc=dark?'#9c9a92':'#73726c', gc=dark?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)';
+  const font={family:'monospace',size:11};
+  const base={responsive:true,maintainAspectRatio:true,animation:{duration:200},
+    plugins:{legend:{labels:{color:tc,font,boxWidth:10}}},
+    scales:{x:{ticks:{color:tc,font},grid:{color:gc}},y:{ticks:{color:tc,font},grid:{color:gc}}}};
+  charts.tl  = new Chart(document.getElementById('c-tl'),{type:'line',data:{labels:[],datasets:PROVIDERS.map((p,i)=>({label:p,data:[],borderColor:PC_COLORS[i],backgroundColor:'transparent',borderWidth:2,pointRadius:1.5,tension:.4}))},options:{...base}});
+  charts.spd = new Chart(document.getElementById('c-spd'),{type:'bar',data:{labels:PROVIDERS,datasets:[{label:'Avg DL',data:[0,0,0,0],backgroundColor:PC_COLORS.map(c=>c+'44'),borderColor:PC_COLORS,borderWidth:1.5}]},options:{...base,plugins:{legend:{display:false}}}});
+  charts.net = new Chart(document.getElementById('c-net'),{type:'doughnut',data:{labels:['5G','4G','3G','2G'],datasets:[{data:[0,0,0,0],backgroundColor:PC_COLORS,borderColor:'transparent'}]},options:{...base,cutout:'60%',scales:{x:{display:false},y:{display:false}},plugins:{legend:{position:'right',labels:{color:tc,font:{family:'inherit',size:12},padding:8}}}}});
+  charts.lat = new Chart(document.getElementById('c-lat'),{type:'bar',data:{labels:CITIES.map(c=>c.n.split(' ')[0]),datasets:[{label:'Avg latency',data:new Array(CITIES.length).fill(0),backgroundColor:'#BA751744',borderColor:'#BA7517',borderWidth:1.5}]},options:{...base,indexAxis:'y',plugins:{legend:{display:false}}}});
+  charts.sig = new Chart(document.getElementById('c-sig'),{type:'bar',data:{labels:['Excellent','Good','Fair','Poor'],datasets:[{data:[0,0,0,0],backgroundColor:PC_COLORS.map(c=>c+'44'),borderColor:PC_COLORS,borderWidth:1.5}]},options:{...base,plugins:{legend:{display:false}}}});
+  charts.outTl = new Chart(document.getElementById('c-out-tl'),{
+    type:'line',
+    data:{labels:[],datasets:PROVIDERS.map((p,i)=>({label:p,data:[],borderColor:PC_COLORS[i],backgroundColor:'transparent',borderWidth:2,pointRadius:2,tension:.35}))},
+    options:{...base,scales:{x:{ticks:{color:tc,font},grid:{color:gc}},y:{min:0,max:100,ticks:{color:tc,font},grid:{color:gc}}}}
+  });
+  charts.outPre = new Chart(document.getElementById('c-out-pre'),{
+    type:'line',
+    data:{labels:[],datasets:[
+      {label:'Signal (dBm)',data:[],borderColor:'#185FA5',backgroundColor:'transparent',borderWidth:2,tension:.3},
+      {label:'Latency (ms)',data:[],borderColor:'#BA7517',backgroundColor:'transparent',borderWidth:2,tension:.3}
+    ]},
+    options:{...base}
+  });
+}
+
+function updCharts(){
+  if(!DB.length) return;
+  const r=DB.slice(-300), W=8, wins=[];
+  for(let i=Math.max(0,DB.length-40*W);i<DB.length;i+=W) wins.push(DB.slice(i,i+W));
+  charts.tl.data.labels=wins.map((_,i)=>`${i*W}`);
+  PROVIDERS.forEach((p,pi)=>{charts.tl.data.datasets[pi].data=wins.map(w=>{const pw=w.filter(x=>x.operator===p);return pw.length?Math.round(pw.reduce((s,x)=>s+x.signal_dbm,0)/pw.length*10)/10:null});});
+  charts.tl.update();
+  charts.spd.data.datasets[0].data=PROVIDERS.map(p=>{const pr=r.filter(x=>x.operator===p);return pr.length?Math.round(pr.reduce((s,x)=>s+x.dl_mbps,0)/pr.length*10)/10:0;});
+  charts.spd.update();
+  ['5G','4G','3G','2G'].forEach((t,i)=>charts.net.data.datasets[0].data[i]=r.filter(x=>x.network===t).length);
+  charts.net.update();
+  charts.lat.data.datasets[0].data=CITIES.map(c=>{const cr=r.filter(x=>x.city===c.n);return cr.length?Math.round(cr.reduce((s,x)=>s+x.latency_ms,0)/cr.length):0;});
+  charts.lat.update();
+  ['excellent','good','fair','poor'].forEach((lv,i)=>charts.sig.data.datasets[0].data[i]=r.filter(x=>sigLv(x.signal_dbm)===lv).length);
+  charts.sig.update();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  DATA LOG
+// ═══════════════════════════════════════════════════════════
+function addLog(r){
+  const tb=document.getElementById('ltb');
+  const nc=r.network==='5G'?'#e1f5ee':r.network==='4G'?'#e6f1fb':r.network==='3G'?'#faeeda':'#fcebeb';
+  const ntc=r.network==='5G'?'#0f6e56':r.network==='4G'?'#185fa5':r.network==='3G'?'#ba7517':'#a32d2d';
+  const c=sigCl(r.signal_dbm);
+  const tr=document.createElement('tr');
+  tr.innerHTML=`<td>${r.id}</td><td>${new Date(r.ts).toLocaleTimeString()}</td><td>${r.city}</td><td style="color:#185fa5">${r.cell_id||r.tower_id}</td><td>${r.operator}</td><td><span class="nbadge" style="background:${nc};color:${ntc}">${r.network}</span></td><td style="color:${c}">${r.signal_dbm}</td><td>${r.latency_ms}</td><td>${r.dl_mbps}</td><td>${r.ul_mbps}</td><td>${r.rsrp}</td><td>${r.rsrq}</td>`;
+  tb.insertBefore(tr,tb.firstChild);
+  while(tb.children.length>500) tb.removeChild(tb.lastChild);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  KPIs
+// ═══════════════════════════════════════════════════════════
+function updKPIs(){
+  if(!DB.length) return;
+  const r=DB.slice(-100);
+  document.getElementById('k-sig').textContent=`${Math.round(r.reduce((s,x)=>s+x.signal_dbm,0)/r.length*10)/10} dBm`;
+  document.getElementById('k-lat').textContent=`${Math.round(r.reduce((s,x)=>s+x.latency_ms,0)/r.length)} ms`;
+  document.getElementById('k-spd').textContent=`${Math.round(r.reduce((s,x)=>s+x.dl_mbps,0)/r.length*10)/10} Mbps`;
+  document.getElementById('k-rec').textContent=DB.length.toLocaleString();
+  document.getElementById('k-4g').textContent=`${Math.round(r.filter(x=>x.network==='4G'||x.network==='5G').length/r.length*100)}%`;
+  document.getElementById('rc').textContent=DB.length;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  PATTERNS
+// ═══════════════════════════════════════════════════════════
+function updPatterns(){
+  if(DB.length<10) return;
+  const r=DB.slice(-500);
+  document.getElementById('pt').textContent=DB.length;
+  document.getElementById('ps').textContent=Math.round(r.reduce((s,x)=>s+x.signal_dbm,0)/r.length*10)/10;
+  document.getElementById('pl').textContent=Math.round(r.reduce((s,x)=>s+x.latency_ms,0)/r.length);
+  document.getElementById('pp').textContent=Math.round(r.reduce((s,x)=>s+x.dl_mbps,0)/r.length*10)/10;
+  const provs=PROVIDERS.map(p=>{const pr=r.filter(x=>x.operator===p);return{name:p,sig:pr.length?pr.reduce((s,x)=>s+x.signal_dbm,0)/pr.length:-110,spd:pr.length?pr.reduce((s,x)=>s+x.dl_mbps,0)/pr.length:0};}).sort((a,b)=>b.sig-a.sig);
+  const mx=Math.abs(provs[0].sig), mn=Math.abs(provs[provs.length-1].sig);
+  document.getElementById('pr-rank').innerHTML=provs.map((p,i)=>`<div class="ri"><div class="rn">#${i+1}</div><div class="rnm">${p.name}</div><div class="rbw"><div class="rb" style="width:${Math.round((Math.abs(p.sig)-mn)/(mx-mn+1)*80+20)}%;background:${PC_COLORS[i]}"></div></div><div class="rv" style="color:${PC_COLORS[i]}">${Math.round(p.sig)} dBm</div></div>`).join('');
+  const cities=CITIES.map(c=>{const cr=r.filter(x=>x.city===c.n);return{name:c.n,sig:cr.length?cr.reduce((s,x)=>s+x.signal_dbm,0)/cr.length:-110,cnt:cr.length};}).filter(c=>c.cnt>0).sort((a,b)=>b.sig-a.sig).slice(0,7);
+  const cx=Math.abs(cities[0]?.sig||-50), cn=Math.abs(cities[cities.length-1]?.sig||-110);
+  document.getElementById('city-rank').innerHTML=cities.map((c,i)=>`<div class="ri"><div class="rn">#${i+1}</div><div class="rnm">${c.name.split(' ')[0]}</div><div class="rbw"><div class="rb" style="width:${Math.round((Math.abs(c.sig)-cn)/(cx-cn+1)*80+20)}%;background:${i<3?'#1D9E75':i<5?'#BA7517':'#A32D2D'}"></div></div><div class="rv">${Math.round(c.sig)} dBm</div></div>`).join('');
+  const ans=[];
+  if(cities.length){const worst=cities[cities.length-1];if(worst.sig<-90)ans.push({cl:'c',ic:'!',txt:`<strong>${worst.name}</strong> has critically poor coverage (${Math.round(worst.sig)} dBm).`});}
+  const gap=provs[0].sig-provs[provs.length-1].sig;
+  if(gap>8)ans.push({cl:'w',ic:'~',txt:`${Math.round(gap)} dBm gap between <strong>${provs[0].name}</strong> and <strong>${provs[provs.length-1].name}</strong>.`});
+  const ltePct=Math.round(r.filter(x=>x.network==='4G'||x.network==='5G').length/r.length*100);
+  if(ltePct<65)ans.push({cl:'w',ic:'~',txt:`Only <strong>${ltePct}%</strong> of readings show 4G/5G. High 3G/2G fallback.`});
+  else ans.push({cl:'g',ic:'v',txt:`4G/5G penetration healthy at <strong>${ltePct}%</strong>.`});
+  ans.push({cl:'g',ic:'*',txt:`Top performer: <strong>${provs[0].name}</strong> — ${Math.round(provs[0].sig)} dBm, ${Math.round(provs[0].spd*10)/10} Mbps avg.`});
+  document.getElementById('anoms').innerHTML=ans.map(a=>`<div class="an ${a.cl}"><div class="an-ic">${a.ic}</div><div>${a.txt}</div></div>`).join('');
+}
+
+function sevClass(v){
+  if(v < 30) return 'g';
+  if(v <= 70) return 'a';
+  return 'r';
+}
+
+function ago(ts){
+  if(!ts) return '-';
+  const s = Math.max(0, Math.floor((Date.now() - new Date(ts).getTime()) / 1000));
+  if(s < 60) return `${s}s ago`;
+  if(s < 3600) return `${Math.floor(s/60)}m ago`;
+  if(s < 86400) return `${Math.floor(s/3600)}h ago`;
+  return `${Math.floor(s/86400)}d ago`;
+}
+
+async function loadOutages(){
+  const [outagesRes, statsRes, corrRes] = await Promise.all([
+    fetch(`${API}/outages?limit=200`),
+    fetch(`${API}/outages/stats`),
+    fetch(`${API}/outages/correlate?limit=80`)
+  ]);
+  if(!outagesRes.ok || !statsRes.ok || !corrRes.ok) throw new Error('Outage data unavailable');
+  const outagesData = await outagesRes.json();
+  const statsData = await statsRes.json();
+  const corrData = await corrRes.json();
+  OUTAGES = outagesData.outages || [];
+  OUTAGE_CORR = corrData.correlations || [];
+  renderOutageStats(statsData);
+  renderOutageTable();
+  renderOutageTimeline();
+  renderOutageCorrelation();
+}
+
+function renderOutageStats(stats){
+  const list = stats.by_operator || [];
+  const total = list.reduce((s,x)=>s + Number(x.total_outages || 0), 0);
+  const most = [...list].sort((a,b)=>Number(b.total_outages)-Number(a.total_outages))[0];
+  const avgDur = list.length ? list.reduce((s,x)=>s+Number(x.avg_duration_min||0),0)/list.length : 0;
+  const mostRecent = [...list].map(x=>x.most_recent_outage).filter(Boolean).sort().reverse()[0];
+  document.getElementById('out-total').textContent = total;
+  document.getElementById('out-most').textContent = most ? `${most.operator} (${most.total_outages})` : '-';
+  document.getElementById('out-avgdur').textContent = `${Math.round(avgDur)} min`;
+  document.getElementById('out-last').textContent = ago(mostRecent);
+}
+
+function renderOutageTimeline(){
+  const byDay = {};
+  OUTAGES.forEach(o=>{
+    if(!PROVIDERS.includes(o.operator)) return;
+    const day = new Date(o.started_at).toISOString().slice(0,10);
+    byDay[day] = byDay[day] || {};
+    byDay[day][o.operator] = Number(o.severity || 0);
+  });
+  const labels = Object.keys(byDay).sort();
+  charts.outTl.data.labels = labels;
+  PROVIDERS.forEach((p, i)=>{
+    charts.outTl.data.datasets[i].data = labels.map(d => byDay[d][p] ?? null);
+  });
+  charts.outTl.update();
+}
+
+function renderOutageTable(){
+  const tb = document.getElementById('out-tb');
+  tb.innerHTML = '';
+  OUTAGES.slice(0,50).forEach(o=>{
+    const sev = Number(o.severity || 0);
+    const tr = document.createElement('tr');
+    const active = !o.ended_at ? 'active' : 'resolved';
+    const sigColor = o.signal_type === 'bgp' ? '#e1f5ee' : o.signal_type === 'ping' ? '#e6f1fb' : '#faeeda';
+    tr.innerHTML = `<td>${o.operator}</td>
+      <td><span class="sig-b" style="background:${sigColor}">${o.signal_type || 'n/a'}</span></td>
+      <td class="sev ${sevClass(sev)}">${Math.round(sev*10)/10}</td>
+      <td>${new Date(o.started_at).toLocaleString()}</td>
+      <td>${o.duration_min ?? '-'}</td>
+      <td>${active}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+function renderOutageCorrelation(){
+  const rows = OUTAGE_CORR.slice(0,24).reverse();
+  charts.outPre.data.labels = rows.map(r => new Date(r.started_at).toLocaleDateString());
+  charts.outPre.data.datasets[0].data = rows.map(r => Number(r.pre_avg_signal ?? null));
+  charts.outPre.data.datasets[1].data = rows.map(r => Number(r.pre_avg_latency ?? null));
+  charts.outPre.update();
+
+  const el = document.getElementById('out-pre-list');
+  el.innerHTML = rows.length
+    ? rows.slice(-8).reverse().map(r=>`<div style="margin-bottom:8px"><strong>${r.operator}</strong> before outage: signal ${r.pre_avg_signal ?? 'n/a'} dBm, latency ${r.pre_avg_latency ?? 'n/a'} ms, DL ${r.pre_avg_dl ?? 'n/a'} Mbps</div>`).join('')
+    : 'No pre-outage correlation rows yet.';
+}
+
+async function syncOutagesNow(){
+  const btn = document.getElementById('out-sync-btn');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Syncing...';
+  try{
+    const res = await fetch(`${API}/outages/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) });
+    if(!res.ok) throw new Error('Sync failed');
+    await loadOutages();
+  }catch(e){
+    alert(e.message || 'Could not sync outages now.');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SPEED TEST — ANALOGUE GAUGES
+// ═══════════════════════════════════════════════════════════
+function drawGauge(id,val,maxV,color){
+  const canvas=document.getElementById(id); if(!canvas)return;
+  const ctx=canvas.getContext('2d'), W=canvas.width, H=canvas.height;
+  const cx=W/2, cy=H-14, R=Math.min(W,H*2)*.44;
+  const dark=isDark(), track=dark?'#444441':'#d3d1c7', txt2=dark?'#73726c':'#888780';
+  ctx.clearRect(0,0,W,H);
+  ctx.save();ctx.shadowColor=dark?'rgba(0,0,0,.4)':'rgba(0,0,0,.12)';ctx.shadowBlur=18;
+  ctx.beginPath();ctx.arc(cx,cy,R+6,Math.PI,2*Math.PI);ctx.fillStyle=dark?'#3a3a38':'#e8e7e0';ctx.fill();ctx.restore();
+  ctx.beginPath();ctx.arc(cx,cy,R,Math.PI,2*Math.PI);ctx.lineWidth=R*.13;ctx.strokeStyle=track;ctx.lineCap='round';ctx.stroke();
+  [{from:0,to:.4,c:'#1D9E7555'},{from:.4,to:.7,c:'#BA751755'},{from:.7,to:1,c:'#A32D2D55'}].forEach(z=>{
+    ctx.beginPath();ctx.arc(cx,cy,R,Math.PI+z.from*Math.PI,Math.PI+z.to*Math.PI);ctx.lineWidth=R*.13;ctx.strokeStyle=z.c;ctx.lineCap='butt';ctx.stroke();
+  });
+  const pct=Math.min(val/maxV,1);
+  if(pct>0){ctx.beginPath();ctx.arc(cx,cy,R,Math.PI,Math.PI+pct*Math.PI);ctx.lineWidth=R*.13;ctx.strokeStyle=color;ctx.lineCap='round';ctx.stroke();}
+  for(let i=0;i<=10;i++){
+    const ang=Math.PI+i*(Math.PI/10), isMaj=i%2===0;
+    const r1=R+(isMaj?R*.18:R*.12), r2=R+R*.06;
+    ctx.beginPath();ctx.moveTo(cx+Math.cos(ang)*r1,cy+Math.sin(ang)*r1);ctx.lineTo(cx+Math.cos(ang)*r2,cy+Math.sin(ang)*r2);
+    ctx.lineWidth=isMaj?1.5:.8;ctx.strokeStyle=isMaj?txt2:track;ctx.stroke();
+    if(isMaj){ctx.font=`${Math.round(R*.14)}px monospace`;ctx.fillStyle=txt2;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(Math.round(i/10*maxV),cx+Math.cos(ang)*(r1+R*.16),cy+Math.sin(ang)*(r1+R*.16));}
+  }
+  const na=Math.PI+pct*Math.PI, nL=R*.86, nB=R*.14;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(na);
+  ctx.beginPath();ctx.moveTo(-nB,0);ctx.lineTo(nL,0);ctx.lineWidth=2.5;ctx.strokeStyle=color;ctx.lineCap='round';ctx.stroke();
+  ctx.beginPath();ctx.moveTo(nL-R*.06,-1.5);ctx.lineTo(nL+R*.04,0);ctx.lineTo(nL-R*.06,1.5);ctx.fillStyle=color;ctx.fill();
+  ctx.restore();
+  ctx.beginPath();ctx.arc(cx,cy,R*.08,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+  ctx.beginPath();ctx.arc(cx,cy,R*.04,0,Math.PI*2);ctx.fillStyle=dark?'#2c2c2a':'#fff';ctx.fill();
+}
+
+function drawPingGauge(id,val){
+  const canvas=document.getElementById(id); if(!canvas)return;
+  const ctx=canvas.getContext('2d'), W=canvas.width, H=canvas.height;
+  const cx=W/2, cy=H-10, R=Math.min(W,H*2)*.42, maxPing=300;
+  const dark=isDark(), track=dark?'#444441':'#d3d1c7', txt2=dark?'#73726c':'#888780';
+  const color=val<30?'#1D9E75':val<80?'#185FA5':val<150?'#BA7517':'#A32D2D';
+  ctx.clearRect(0,0,W,H);
+  ctx.save();ctx.shadowColor=dark?'rgba(0,0,0,.4)':'rgba(0,0,0,.1)';ctx.shadowBlur=12;
+  ctx.beginPath();ctx.arc(cx,cy,R+5,Math.PI,2*Math.PI);ctx.fillStyle=dark?'#3a3a38':'#e8e7e0';ctx.fill();ctx.restore();
+  ctx.beginPath();ctx.arc(cx,cy,R,Math.PI,2*Math.PI);ctx.lineWidth=R*.15;ctx.strokeStyle=track;ctx.lineCap='round';ctx.stroke();
+  const pct=Math.min(val/maxPing,1);
+  if(pct>0){ctx.beginPath();ctx.arc(cx,cy,R,Math.PI,Math.PI+pct*Math.PI);ctx.lineWidth=R*.15;ctx.strokeStyle=color;ctx.lineCap='round';ctx.stroke();}
+  const na=Math.PI+pct*Math.PI;
+  ctx.save();ctx.translate(cx,cy);ctx.rotate(na);
+  ctx.beginPath();ctx.moveTo(-R*.12,0);ctx.lineTo(R*.82,0);ctx.lineWidth=2;ctx.strokeStyle=color;ctx.lineCap='round';ctx.stroke();
+  ctx.restore();
+  ctx.beginPath();ctx.arc(cx,cy,R*.07,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();
+  ctx.beginPath();ctx.arc(cx,cy,R*.035,0,Math.PI*2);ctx.fillStyle=dark?'#2c2c2a':'#fff';ctx.fill();
+}
+
+let stRunning=false, curDL=0, curUL=0, curPing=0;
+const stHistory=[];
+
+function ease(f,t,p){return f+(t-f)*(1-Math.pow(1-p,3))}
+async function animNeedle(id,from,to,maxV,color,dur,ping){
+  return new Promise(r=>{
+    const s=performance.now();
+    function f(n){const t=Math.min((n-s)/dur,1),v=ease(from,to,t);ping?drawPingGauge(id,v):drawGauge(id,v,maxV,color);t<1?requestAnimationFrame(f):r();}
+    requestAnimationFrame(f);
+  });
+}
+
+async function runTest(){
+  if(stRunning) return;
+  stRunning=true;
+  const btn=document.getElementById('run-btn');
+  btn.disabled=true; btn.textContent='Testing…';
+  try{
+  const phase=document.getElementById('st-phase');
+  await animNeedle('g-dl',curDL,0,200,'#1D9E75',300); await animNeedle('g-ul',curUL,0,100,'#185FA5',300); await animNeedle('g-ping',curPing,0,300,'',300,true);
+  ['g-dl-val','g-ul-val','g-ping-val'].forEach(id=>{document.getElementById(id).textContent='— Mbps';});
+  document.getElementById('g-ping-val').textContent='— ms';
+  ['r-dl','r-ul','r-ping','r-jit'].forEach(id=>document.getElementById(id).textContent='—');
+  phase.textContent='Measuring ping…';
+  const pingRuns = [];
+  for(let i=0;i<4;i++){
+    const s=performance.now();
+    await fetch(`${API}/speedtest/ping?t=${Date.now()}_${i}`, { cache:'no-store' });
+    pingRuns.push(performance.now()-s);
+  }
+  const tPing = pingRuns.reduce((a,b)=>a+b,0)/pingRuns.length;
+  const pingAvgNoFirst = pingRuns.slice(1).reduce((a,b)=>a+b,0)/Math.max(1,pingRuns.length-1);
+  const tJit = Math.sqrt(pingRuns.map(x=>(x-pingAvgNoFirst)*(x-pingAvgNoFirst)).reduce((a,b)=>a+b,0)/pingRuns.length);
+  await animNeedle('g-ping',0,tPing,300,'',700,true);
+  document.getElementById('g-ping-val').textContent=`${Math.round(tPing)} ms`;
+  document.getElementById('r-ping').textContent=Math.round(tPing);
+  document.getElementById('r-jit').textContent=Math.round(tJit*10)/10;
+  await new Promise(r=>setTimeout(r,300));
+  phase.textContent='Testing download speed…';
+  const dlSizeMb = 8;
+  const dlStart = performance.now();
+  const dlRes = await fetch(`${API}/speedtest/download?size_mb=${dlSizeMb}&t=${Date.now()}`, { cache:'no-store' });
+  const dlBuf = await dlRes.arrayBuffer();
+  const dlSec = Math.max(0.001, (performance.now() - dlStart) / 1000);
+  const tDL = (dlBuf.byteLength * 8 / 1000000) / dlSec;
+  await new Promise(r=>{let t=0;(function f(){t+=16;const fr=Math.min(t/2200,1),n=(Math.random()-.5)*tDL*.07,v=Math.max(0,ease(0,tDL,fr)+n*(fr>.3?1:0));drawGauge('g-dl',v,200,v<80?'#1D9E75':v<150?'#BA7517':'#A32D2D');document.getElementById('g-dl-val').textContent=`${Math.round(v)} Mbps`;fr<1?requestAnimationFrame(f):(drawGauge('g-dl',tDL,200,'#1D9E75'),document.getElementById('g-dl-val').textContent=`${Math.round(tDL)} Mbps`,document.getElementById('r-dl').textContent=Math.round(tDL*10)/10,curDL=tDL,r());})();});
+  await new Promise(r=>setTimeout(r,400));
+  phase.textContent='Testing upload speed…';
+  const ulSizeMb = 4;
+  const ulPayload = new Uint8Array(ulSizeMb * 1024 * 1024);
+  crypto.getRandomValues(ulPayload.subarray(0, Math.min(65536, ulPayload.length)));
+  const ulStart = performance.now();
+  await fetch(`${API}/speedtest/upload?t=${Date.now()}`, {
+    method:'POST',
+    headers:{'Content-Type':'application/octet-stream','Cache-Control':'no-store'},
+    body: ulPayload
+  });
+  const ulSec = Math.max(0.001, (performance.now() - ulStart) / 1000);
+  const tUL = (ulPayload.byteLength * 8 / 1000000) / ulSec;
+  await new Promise(r=>{let t=0;(function f(){t+=16;const fr=Math.min(t/2200,1),n=(Math.random()-.5)*tUL*.07,v=Math.max(0,ease(0,tUL,fr)+n*(fr>.3?1:0));drawGauge('g-ul',v,100,v<40?'#185FA5':v<70?'#BA7517':'#A32D2D');document.getElementById('g-ul-val').textContent=`${Math.round(v)} Mbps`;fr<1?requestAnimationFrame(f):(drawGauge('g-ul',tUL,100,'#185FA5'),document.getElementById('g-ul-val').textContent=`${Math.round(tUL)} Mbps`,document.getElementById('r-ul').textContent=Math.round(tUL*10)/10,curUL=tUL,r());})();});
+  curPing=tPing;
+  const rating=tDL>60?{t:'Excellent',c:'#1D9E75',bg:'#e1f5ee'}:tDL>25?{t:'Good',c:'#185FA5',bg:'#e6f1fb'}:tDL>8?{t:'Fair',c:'#BA7517',bg:'#faeeda'}:{t:'Poor',c:'#A32D2D',bg:'#fcebeb'};
+  phase.innerHTML=`Test complete — <strong style="color:${rating.c}">${rating.t}</strong> connection`;
+  const op = 'Auto';
+  const srvCity = 'Current connection';
+  // save to DB
+  try{await fetch(`${API}/speedtests`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({server_city:srvCity.trim(),operator:op,dl_mbps:Math.round(tDL*10)/10,ul_mbps:Math.round(tUL*10)/10,ping_ms:Math.round(tPing),jitter_ms:Math.round(tJit*10)/10,rating:rating.t})});}catch(e){}
+  stHistory.unshift({time:new Date().toLocaleTimeString(),srv:srvCity.trim(),dl:Math.round(tDL*10)/10,ul:Math.round(tUL*10)/10,ping:Math.round(tPing),rating});
+  if(stHistory.length>8) stHistory.pop();
+  document.getElementById('sh-rows').innerHTML=stHistory.map(h=>`<div class="sh-row"><span class="sh-time">${h.time}</span><span class="sh-srv">${h.srv}</span><span class="sh-val" style="color:#1D9E75">${h.dl} ↓</span><span class="sh-val" style="color:#185FA5">${h.ul} ↑</span><span class="sh-val" style="color:#BA7517">${h.ping} ms</span><span class="sh-rt" style="background:${h.rating.bg};color:${h.rating.c}">${h.rating.t}</span></div>`).join('');
+  }catch(e){
+    document.getElementById('st-phase').textContent='Speed test failed. Check connection and try again.';
+  }finally{
+    btn.disabled=false; btn.textContent='Run test'; stRunning=false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EXPORT / CLEAR
+// ═══════════════════════════════════════════════════════════
+function doExport(){
+  const hdr='ID,Timestamp,City,CellID,Provider,Network,Signal(dBm),Latency(ms),DL(Mbps),UL(Mbps),RSRP,RSRQ';
+  const rows=DB.map(r=>`${r.id},${r.ts},${r.city},${r.cell_id||r.tower_id},${r.operator},${r.network},${r.signal_dbm},${r.latency_ms},${r.dl_mbps},${r.ul_mbps},${r.rsrp},${r.rsrq}`);
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([[hdr,...rows].join('\n')],{type:'text/csv'}));
+  a.download=`netwatch_ng_${new Date().toISOString().split('T')[0]}.csv`; a.click();
+}
+function doClear(){if(!confirm('Clear all readings from view?')) return; DB=[]; rid=0; document.getElementById('ltb').innerHTML=''; updKPIs();}
+
+// ═══════════════════════════════════════════════════════════
+//  COLLECTION LOOP
+// ═══════════════════════════════════════════════════════════
+function collect(){
+  if(!TOWERS.length) return;
+  const sample=[...TOWERS].sort(()=>Math.random()-.5).slice(0, 8+Math.floor(Math.random()*6));
+  sample.forEach(t=>{
+    const r=genReading(t);
+    DB.push(r); TL[t.id]=r; addLog(r); readingsBuf.push(r);
+  });
+  updKPIs(); updMap(); applyF();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  TAB SWITCHING
+// ═══════════════════════════════════════════════════════════
+function sw(name, el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById(`p-${name}`).classList.add('on');
+  if(name==='analytics') updCharts();
+  if(name==='patterns')  updPatterns();
+  if(name==='outages')   loadOutages().catch(()=>{});
+  if(name==='map')       setTimeout(()=>map.invalidateSize(),50);
+  if(name==='speedtest'){drawGauge('g-dl',curDL||0,200,'#1D9E75');drawGauge('g-ul',curUL||0,100,'#185FA5');drawPingGauge('g-ping',curPing||0);}
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════
+window.addEventListener('load', async ()=>{
+  document.getElementById('dest-q')?.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter') searchPlaces();
+  });
+  document.getElementById('dest-q')?.addEventListener('input', ()=>{
+    selectedPlace = null;
+  });
+  const apiOnline = await checkAPI();
+  await loadTowers();
+  initMap();
+  searchPlaceMarkers = L.layerGroup().addTo(map);
+  initCharts();
+  loadOutages().catch(()=>{});
+
+  if (SIMULATION_ON || !apiOnline){
+    // warm up with initial simulated readings
+    for(let i=0;i<10;i++) collect();
+    // live collection every 3 s
+    setInterval(collect, 3000);
+    // flush simulated readings to DB every 15 s
+    setInterval(flushReadings, 15000);
+  } else {
+    // real-data mode: read latest from DB and refresh periodically
+    await syncLatestReadings();
+    setInterval(syncLatestReadings, 15000);
+  }
+
+  // refresh charts/patterns if visible every 5 s
+  setInterval(()=>{
+    if(document.getElementById('p-analytics').classList.contains('on')) updCharts();
+    if(document.getElementById('p-patterns').classList.contains('on'))  updPatterns();
+    if(document.getElementById('p-outages').classList.contains('on'))   loadOutages().catch(()=>{});
+  }, 5000);
+});
+</script>
+</body>
+</html>
