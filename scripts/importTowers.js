@@ -14,7 +14,7 @@ const { pool, bootstrap } = require('../server/db');
 const CSV_PATH = process.env.CSV_PATH
   || path.join(__dirname, '../data/621.csv');
 
-const BATCH_SIZE = 500;   // rows inserted per DB transaction
+const BATCH_SIZE = 100;   // rows inserted per DB transaction
 
 // ─── Operator lookup (MNC → name) ─────────────────────────────────
 const MNC_MAP = {
