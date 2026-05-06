@@ -392,6 +392,64 @@ router.get('/qos', async (req, res) => {
   }
 });
 
+// GET /api/coverage?city=Kano&operator=MTN&network=4G&limit=200
+// Synthetic ElectricSheep Africa coverage and signal-strength data.
+router.get('/coverage', async (req, res) => {
+  try {
+    const { city, operator, network, bbox, limit = 200 } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (operator && operator !== 'all') {
+      conds.push(`operator = $${p++}`);
+      params.push(operator);
+    }
+    if (network && network !== 'all') {
+      conds.push(`network = $${p++}`);
+      params.push(normalizeNetwork(network));
+    }
+    if (bbox) {
+      const [minLat, minLon, maxLat, maxLon] = bbox.split(',').map(Number);
+      if (![minLat, minLon, maxLat, maxLon].every(Number.isFinite)) {
+        return res.status(400).json({ error: 'bbox must be minLat,minLon,maxLat,maxLon' });
+      }
+      conds.push(`lat BETWEEN $${p++} AND $${p++}`);
+      params.push(minLat, maxLat);
+      conds.push(`lon BETWEEN $${p++} AND $${p++}`);
+      params.push(minLon, maxLon);
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 2000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT measurement_id, lat, lon, city, operator, network,
+              signal_strength_dbm, coverage_quality, download_speed_mbps,
+              upload_speed_mbps, latency_ms, source_tower_id,
+              distance_to_tower_km, indoor_outdoor, source
+       FROM coverage_data
+       ${where}
+       ORDER BY signal_strength_dbm DESC NULLS LAST
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      coverage: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -478,12 +536,76 @@ router.get('/recommendation', async (req, res) => {
     );
 
     if (!rows.length) {
+      const { rows: coverageRows } = await pool.query(
+        `
+        WITH nearby AS (
+          SELECT
+            operator,
+            signal_strength_dbm,
+            latency_ms,
+            download_speed_mbps,
+            upload_speed_mbps,
+            (6371 * acos(
+              LEAST(1, GREATEST(-1,
+                cos(radians($1)) * cos(radians(lat)) * cos(radians(lon) - radians($2)) +
+                sin(radians($1)) * sin(radians(lat))
+              ))
+            )) AS distance_km
+          FROM coverage_data
+        )
+        SELECT
+          operator,
+          COUNT(*)::int AS sample_count,
+          ROUND(AVG(signal_strength_dbm)::numeric, 1) AS avg_signal,
+          ROUND(AVG(latency_ms)::numeric, 0) AS avg_latency,
+          ROUND(AVG(download_speed_mbps)::numeric, 1) AS avg_dl,
+          ROUND(AVG(upload_speed_mbps)::numeric, 1) AS avg_ul,
+          ROUND(MIN(distance_km)::numeric, 2) AS nearest_km
+        FROM nearby
+        WHERE distance_km <= $3
+        GROUP BY operator
+        ORDER BY sample_count DESC
+        `,
+        [lat, lon, radiusKm]
+      );
+
+      if (!coverageRows.length) {
+        return res.json({
+          ok: true,
+          destination: { lat, lon, radius_km: radiusKm, hours },
+          confidence: 'low',
+          message: 'No recent readings or synthetic coverage samples found near this destination.',
+          providers: [],
+        });
+      }
+
+      const coverageRanked = coverageRows.map((r) => {
+        const sigScore = Math.max(0, Math.min(100, ((Number(r.avg_signal) + 110) / 60) * 100));
+        const latScore = Math.max(0, Math.min(100, 100 - (Number(r.avg_latency) / 200) * 100));
+        const dlScore = Math.max(0, Math.min(100, (Number(r.avg_dl) / 50) * 100));
+        const sampleScore = Math.max(20, Math.min(100, (Number(r.sample_count) / 80) * 100));
+        const totalScore = (sigScore * 0.45) + (latScore * 0.2) + (dlScore * 0.25) + (sampleScore * 0.1);
+
+        return {
+          operator: r.operator || 'Unknown',
+          score: Math.round(totalScore * 10) / 10,
+          sample_count: Number(r.sample_count),
+          avg_signal: Number(r.avg_signal),
+          avg_latency: Number(r.avg_latency),
+          avg_dl: Number(r.avg_dl),
+          avg_ul: Number(r.avg_ul),
+          nearest_km: Number(r.nearest_km),
+          source: 'synthetic_coverage',
+        };
+      }).sort((a, b) => b.score - a.score);
+
       return res.json({
         ok: true,
         destination: { lat, lon, radius_km: radiusKm, hours },
-        confidence: 'low',
-        message: 'No recent readings found near this destination.',
-        providers: [],
+        confidence: 'medium',
+        source_note: 'Recommendation uses synthetic ElectricSheep Africa coverage data because no recent live readings were found nearby.',
+        providers: coverageRanked,
+        best_provider: coverageRanked[0] || null,
       });
     }
 

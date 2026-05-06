@@ -130,6 +130,33 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_qos_metrics_operator    ON qos_metrics(operator);
       CREATE INDEX IF NOT EXISTS idx_qos_metrics_network     ON qos_metrics(network);
       CREATE INDEX IF NOT EXISTS idx_qos_metrics_source_tower ON qos_metrics(source_tower_id);
+
+      -- Synthetic geospatial coverage baseline from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS coverage_data (
+        id                    SERIAL PRIMARY KEY,
+        measurement_id        VARCHAR(40) NOT NULL UNIQUE,
+        lat                   DOUBLE PRECISION NOT NULL,
+        lon                   DOUBLE PRECISION NOT NULL,
+        city                  VARCHAR(60),
+        operator              VARCHAR(20),
+        network               VARCHAR(10),
+        signal_strength_dbm   DOUBLE PRECISION,
+        coverage_quality      VARCHAR(20),
+        download_speed_mbps   DOUBLE PRECISION,
+        upload_speed_mbps     DOUBLE PRECISION,
+        latency_ms            DOUBLE PRECISION,
+        source_tower_id       VARCHAR(40),
+        distance_to_tower_km  DOUBLE PRECISION,
+        indoor_outdoor        VARCHAR(20),
+        source                VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic coverage dataset',
+        imported_at           TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_coverage_data_city         ON coverage_data(city);
+      CREATE INDEX IF NOT EXISTS idx_coverage_data_operator     ON coverage_data(operator);
+      CREATE INDEX IF NOT EXISTS idx_coverage_data_network      ON coverage_data(network);
+      CREATE INDEX IF NOT EXISTS idx_coverage_data_latlon       ON coverage_data(lat, lon);
+      CREATE INDEX IF NOT EXISTS idx_coverage_data_source_tower ON coverage_data(source_tower_id);
     `);
     console.log('✅  Database schema ready');
   } finally {

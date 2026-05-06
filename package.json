@@ -8,6 +8,7 @@
     "dev": "nodemon server/index.js",
     "import": "node scripts/importTowers.js",
     "import:qos": "node scripts/importQoS.js",
+    "import:coverage": "node scripts/importCoverage.js",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {
