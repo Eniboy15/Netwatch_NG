@@ -612,6 +612,91 @@ router.get('/hardware', async (req, res) => {
   }
 });
 
+// GET /api/uptime?operator=MTN&city=Lagos&reason=power_failure&limit=200
+// Synthetic ElectricSheep Africa base-station uptime and downtime labels.
+router.get('/uptime', async (req, res) => {
+  try {
+    const {
+      operator,
+      city,
+      state,
+      reason,
+      network,
+      tower_id,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') {
+      conds.push(`operator = $${p++}`);
+      params.push(operator);
+    }
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (state && state !== 'all') {
+      conds.push(`state = $${p++}`);
+      params.push(state);
+    }
+    if (reason && reason !== 'all') {
+      conds.push(`outage_reason = $${p++}`);
+      params.push(String(reason).slice(0, 40));
+    }
+    if (network && network !== 'all') {
+      conds.push(`network = $${p++}`);
+      params.push(normalizeNetwork(network));
+    }
+    if (tower_id) {
+      conds.push(`source_tower_id = $${p++}`);
+      params.push(String(tower_id).slice(0, 40));
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`log_date >= $${p++}`);
+      params.push(fromDate.toISOString().slice(0, 10));
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`log_date <= $${p++}`);
+      params.push(untilDate.toISOString().slice(0, 10));
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT source_tower_id, log_date, operator, city, state, uptime_percentage,
+              downtime_minutes, outage_count, outage_reason, network,
+              avg_users_affected, source
+       FROM uptime_logs
+       ${where}
+       ORDER BY log_date DESC, downtime_minutes DESC NULLS LAST
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      uptime_logs: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -941,6 +1026,31 @@ router.get('/outages/correlate', async (req, res) => {
           ON hs.sensor_time >= o.started_at - INTERVAL '2 hours'
          AND hs.sensor_time < o.started_at
         GROUP BY o.id
+      ),
+      uptime_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(ul.*)::int AS uptime_log_count,
+          ROUND(AVG(ul.uptime_percentage)::numeric, 2) AS avg_uptime_percentage,
+          ROUND(SUM(ul.downtime_minutes)::numeric, 1) AS total_downtime_minutes,
+          SUM(ul.outage_count)::int AS total_synthetic_outages,
+          COALESCE(
+            jsonb_object_agg(ul.outage_reason, reason_counts.total)
+              FILTER (WHERE ul.outage_reason IS NOT NULL),
+            '{}'::jsonb
+          ) AS outage_reason_counts
+        FROM limited_outages o
+        LEFT JOIN uptime_logs ul
+          ON ul.operator = o.operator
+         AND ul.log_date BETWEEN (o.started_at::date - INTERVAL '1 day') AND o.started_at::date
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS total
+          FROM uptime_logs ul2
+          WHERE ul2.operator = o.operator
+            AND ul2.log_date BETWEEN (o.started_at::date - INTERVAL '1 day') AND o.started_at::date
+            AND ul2.outage_reason = ul.outage_reason
+        ) reason_counts ON true
+        GROUP BY o.id
       )
       SELECT
         o.id AS outage_id,
@@ -961,11 +1071,17 @@ router.get('/outages/correlate', async (req, res) => {
         COALESCE(hws.pre_hardware_alert_count, 0) AS pre_hardware_alert_count,
         COALESCE(hws.pre_hardware_bad_health_count, 0) AS pre_hardware_bad_health_count,
         hws.pre_avg_temperature_celsius,
-        hws.pre_avg_power_draw_watts
+        hws.pre_avg_power_draw_watts,
+        COALESCE(us.uptime_log_count, 0) AS uptime_log_count,
+        us.avg_uptime_percentage,
+        us.total_downtime_minutes,
+        COALESCE(us.total_synthetic_outages, 0) AS total_synthetic_outages,
+        COALESCE(us.outage_reason_counts, '{}'::jsonb) AS outage_reason_counts
       FROM limited_outages o
       LEFT JOIN reading_stats rs ON rs.outage_id = o.id
       LEFT JOIN event_stats es ON es.outage_id = o.id
       LEFT JOIN hardware_stats hws ON hws.outage_id = o.id
+      LEFT JOIN uptime_stats us ON us.outage_id = o.id
       ORDER BY o.started_at DESC
       `,
       [limit]

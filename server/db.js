@@ -206,6 +206,32 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_hardware_sensors_health       ON hardware_sensors(health_status);
       CREATE INDEX IF NOT EXISTS idx_hardware_sensors_alert        ON hardware_sensors(alert_triggered);
       CREATE INDEX IF NOT EXISTS idx_hardware_sensors_source_tower ON hardware_sensors(source_tower_id);
+
+      -- Synthetic base-station uptime logs from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS uptime_logs (
+        id                    SERIAL PRIMARY KEY,
+        source_tower_id       VARCHAR(40) NOT NULL,
+        log_date              DATE NOT NULL,
+        operator              VARCHAR(20),
+        city                  VARCHAR(60),
+        state                 VARCHAR(60),
+        uptime_percentage     DOUBLE PRECISION,
+        downtime_minutes      DOUBLE PRECISION,
+        outage_count          INT,
+        outage_reason         VARCHAR(40),
+        network               VARCHAR(10),
+        avg_users_affected    INT,
+        source                VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic base-station uptime logs',
+        imported_at           TIMESTAMP DEFAULT NOW(),
+        UNIQUE(source_tower_id, log_date, operator, network)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_uptime_logs_date          ON uptime_logs(log_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_uptime_logs_operator      ON uptime_logs(operator);
+      CREATE INDEX IF NOT EXISTS idx_uptime_logs_city          ON uptime_logs(city);
+      CREATE INDEX IF NOT EXISTS idx_uptime_logs_state         ON uptime_logs(state);
+      CREATE INDEX IF NOT EXISTS idx_uptime_logs_outage_reason ON uptime_logs(outage_reason);
+      CREATE INDEX IF NOT EXISTS idx_uptime_logs_source_tower  ON uptime_logs(source_tower_id);
     `);
     console.log('✅  Database schema ready');
   } finally {

@@ -11,6 +11,7 @@
     "import:coverage": "node scripts/importCoverage.js",
     "import:events": "node scripts/importNetworkEvents.js",
     "import:hardware": "node scripts/importHardwareSensors.js",
+    "import:uptime": "node scripts/importUptimeLogs.js",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {
