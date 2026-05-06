@@ -102,6 +102,34 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_outages_entity_code ON outages(entity_code);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_outages_unique
         ON outages(source, entity_type, entity_code, operator, signal_type, started_at, ended_at);
+
+      -- Synthetic QoS baseline from ElectricSheep Africa / Amon Din.
+      -- Uses source_tower_id because dataset tower IDs are labels like CAL-6586,
+      -- not numeric OpenCelliD tower primary keys.
+      CREATE TABLE IF NOT EXISTS qos_metrics (
+        id                   SERIAL PRIMARY KEY,
+        metric_id            VARCHAR(40) NOT NULL UNIQUE,
+        measured_at          TIMESTAMP NOT NULL,
+        source_tower_id      VARCHAR(40),
+        city                 VARCHAR(60),
+        operator             VARCHAR(20),
+        network              VARCHAR(10),
+        latency_ms           DOUBLE PRECISION,
+        jitter_ms            DOUBLE PRECISION,
+        throughput_mbps      DOUBLE PRECISION,
+        packet_loss_rate     DOUBLE PRECISION,
+        error_rate           DOUBLE PRECISION,
+        signal_strength_dbm  DOUBLE PRECISION,
+        active_users         INT,
+        source               VARCHAR(80) DEFAULT 'ElectricSheep Africa synthetic QoS dataset',
+        imported_at          TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_qos_metrics_measured_at ON qos_metrics(measured_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_qos_metrics_city        ON qos_metrics(city);
+      CREATE INDEX IF NOT EXISTS idx_qos_metrics_operator    ON qos_metrics(operator);
+      CREATE INDEX IF NOT EXISTS idx_qos_metrics_network     ON qos_metrics(network);
+      CREATE INDEX IF NOT EXISTS idx_qos_metrics_source_tower ON qos_metrics(source_tower_id);
     `);
     console.log('✅  Database schema ready');
   } finally {

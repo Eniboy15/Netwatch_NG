@@ -317,6 +317,81 @@ router.get('/readings/summary', async (req, res) => {
   }
 });
 
+// GET /api/qos?city=Lagos&operator=MTN&network=4G&limit=200
+// Synthetic ElectricSheep Africa QoS baseline metrics.
+router.get('/qos', async (req, res) => {
+  try {
+    const {
+      city,
+      operator,
+      network,
+      tower_id,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (operator && operator !== 'all') {
+      conds.push(`operator = $${p++}`);
+      params.push(operator);
+    }
+    if (network && network !== 'all') {
+      conds.push(`network = $${p++}`);
+      params.push(normalizeNetwork(network));
+    }
+    if (tower_id) {
+      conds.push(`source_tower_id = $${p++}`);
+      params.push(String(tower_id).slice(0, 40));
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`measured_at >= $${p++}`);
+      params.push(fromDate.toISOString());
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`measured_at <= $${p++}`);
+      params.push(untilDate.toISOString());
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT metric_id, measured_at, source_tower_id, city, operator, network,
+              latency_ms, jitter_ms, throughput_mbps, packet_loss_rate,
+              error_rate, signal_strength_dbm, active_users, source
+       FROM qos_metrics
+       ${where}
+       ORDER BY measured_at DESC
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      metrics: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
