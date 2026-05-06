@@ -608,6 +608,49 @@ function placeTypeLabel(row){
   return cls || typ || 'location';
 }
 
+function searchQueryTokens(q){
+  return String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function scorePlaceResult(row, query){
+  const tokens = searchQueryTokens(query);
+  const label = String(row.display_name || row.name || '').toLowerCase();
+  const cls = String(row.class || '').toLowerCase();
+  const typ = String(row.type || '').toLowerCase();
+  const q = String(query || '').toLowerCase();
+  let score = 0;
+
+  if(label.startsWith(q)) score += 35;
+  if(label.includes(q)) score += 25;
+  score += tokens.reduce((s,t)=>s + (label.includes(t) ? 7 : -3), 0);
+  if(label.includes('nigeria') || label.includes(', ng')) score += 20;
+  if(cls === 'amenity' || cls === 'shop' || cls === 'tourism' || cls === 'office') score += 10;
+  if(typ === 'restaurant' || typ === 'school' || typ === 'hospital' || typ === 'university') score += 12;
+  return Math.max(0, Math.round(score));
+}
+
+function providerBadge(provider){
+  return provider === 'nominatim' ? 'Nominatim' : provider === 'photon' ? 'Photon' : 'Provider';
+}
+
+function normalizeSearchRows(rows, provider, query){
+  const out = [];
+  for (const row of (rows || [])) {
+    const lat = parseFloat(row.lat);
+    const lon = parseFloat(row.lon);
+    if(!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const label = row.display_name || row.name || row.label || 'Unnamed location';
+    out.push({
+      lat, lon, label,
+      type: placeTypeLabel(row),
+      class: row.class || '',
+      provider,
+      score: scorePlaceResult(row, query)
+    });
+  }
+  return out;
+}
+
 function clearPlaceResults(){
   if(searchPlaceMarkers) searchPlaceMarkers.clearLayers();
   document.getElementById('dest-list').innerHTML = '';
@@ -632,24 +675,45 @@ function renderPlaceResults(rows){
   }
 
   rows.forEach((row, i) => {
-    const lat = parseFloat(row.lat), lon = parseFloat(row.lon);
-    if(!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    const label = row.display_name || row.name || 'Unnamed location';
-    const type = placeTypeLabel(row);
-    const place = { lat, lon, label, type };
+    const place = { lat: row.lat, lon: row.lon, label: row.label, type: row.type, score: row.score, provider: row.provider };
 
     const btn = document.createElement('button');
     btn.className = 'dest-item';
-    btn.innerHTML = `<strong>${i+1}. ${label.split(',')[0]}</strong><div style="color:var(--txt2);margin-top:3px">${type}</div>`;
+    btn.innerHTML = `<strong>${i+1}. ${place.label.split(',')[0]}</strong><div style="color:var(--txt2);margin-top:3px">${place.type} • score ${place.score} • ${providerBadge(place.provider)}</div>`;
     btn.onclick = () => focusPlace(place);
     list.appendChild(btn);
 
-    const marker = L.circleMarker([lat, lon], {
+    const marker = L.circleMarker([place.lat, place.lon], {
       radius: 5, color: '#185FA5', fillColor: '#185FA5', fillOpacity: .45, weight: 1.5
     }).addTo(searchPlaceMarkers);
-    marker.bindPopup(`${label}<br><small>${type}</small>`);
+    marker.bindPopup(`${place.label}<br><small>${place.type} • score ${place.score}</small>`);
     marker.on('click', () => focusPlace(place));
   });
+}
+
+async function fetchNominatim(query){
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=ng&limit=12&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if(!res.ok) throw new Error('nominatim-unavailable');
+  const rows = await res.json();
+  return normalizeSearchRows(rows, 'nominatim', query);
+}
+
+async function fetchPhoton(query){
+  const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(query + ' Nigeria')}&limit=12&lang=en`;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  if(!res.ok) throw new Error('photon-unavailable');
+  const data = await res.json();
+  const rows = (data.features || []).map(f => {
+    const p = f.properties || {};
+    const c = f.geometry?.coordinates || [];
+    return {
+      lat: c[1], lon: c[0],
+      display_name: [p.name, p.city, p.state, p.country].filter(Boolean).join(', '),
+      class: p.osm_key || '', type: p.osm_value || ''
+    };
+  });
+  return normalizeSearchRows(rows, 'photon', query);
 }
 
 async function searchPlaces(){
@@ -665,20 +729,25 @@ async function searchPlaces(){
   out.textContent = 'Searching places...';
   clearPlaceResults();
   try{
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=ng&limit=10&q=${encodeURIComponent(query)}`;
-    const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
-    if(!res.ok) throw new Error('Place search unavailable right now.');
-    const rows = await res.json();
-    renderPlaceResults(rows);
-    const firstValid = rows.find(r => Number.isFinite(parseFloat(r.lat)) && Number.isFinite(parseFloat(r.lon)));
-    if(firstValid){
-      focusPlace({
-        lat: parseFloat(firstValid.lat),
-        lon: parseFloat(firstValid.lon),
-        label: firstValid.display_name || query,
-        type: placeTypeLabel(firstValid)
-      });
-      out.textContent = `Found ${rows.length} result(s). Destination set. Click "Get best provider".`;
+    const merged = [];
+    const nominatimRows = await fetchNominatim(query).catch(()=>[]);
+    merged.push(...nominatimRows);
+    if(merged.length < 5){
+      const photonRows = await fetchPhoton(query).catch(()=>[]);
+      merged.push(...photonRows);
+    }
+
+    const dedup = new Map();
+    merged.forEach(r => {
+      const k = `${Math.round(r.lat*10000)}:${Math.round(r.lon*10000)}:${(r.label || '').toLowerCase().slice(0,30)}`;
+      if(!dedup.has(k) || (dedup.get(k).score < r.score)) dedup.set(k, r);
+    });
+    const ranked = [...dedup.values()].sort((a,b)=>b.score-a.score).slice(0,10);
+
+    renderPlaceResults(ranked);
+    if(ranked.length){
+      focusPlace(ranked[0]);
+      out.textContent = `Found ${ranked.length} ranked result(s). Pick a result, then click "Get best provider".`;
     } else {
       out.textContent = 'No places found for that query.';
     }
