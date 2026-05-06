@@ -769,6 +769,97 @@ router.get('/energy', async (req, res) => {
   }
 });
 
+// GET /api/maintenance?operator=MTN&city=Lagos&status=completed&limit=200
+// Synthetic ElectricSheep Africa maintenance work orders.
+router.get('/maintenance', async (req, res) => {
+  try {
+    const {
+      operator,
+      city,
+      tower_id,
+      type,
+      issue,
+      priority,
+      status,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') {
+      conds.push(`operator = $${p++}`);
+      params.push(operator);
+    }
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (tower_id) {
+      conds.push(`source_tower_id = $${p++}`);
+      params.push(String(tower_id).slice(0, 40));
+    }
+    if (type && type !== 'all') {
+      conds.push(`maintenance_type = $${p++}`);
+      params.push(String(type).slice(0, 40));
+    }
+    if (issue && issue !== 'all') {
+      conds.push(`issue_category = $${p++}`);
+      params.push(String(issue).slice(0, 60));
+    }
+    if (priority && priority !== 'all') {
+      conds.push(`priority = $${p++}`);
+      params.push(String(priority).slice(0, 20));
+    }
+    if (status && status !== 'all') {
+      conds.push(`status = $${p++}`);
+      params.push(String(status).slice(0, 30));
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`scheduled_date >= $${p++}`);
+      params.push(fromDate.toISOString().slice(0, 10));
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`scheduled_date <= $${p++}`);
+      params.push(untilDate.toISOString().slice(0, 10));
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT work_order_id, source_tower_id, city, operator, maintenance_type,
+              issue_category, priority, status, scheduled_date, completed_date,
+              technician_id, repair_duration_hours, parts_replaced, cost_ngn,
+              downtime_minutes, source
+       FROM maintenance_orders
+       ${where}
+       ORDER BY scheduled_date DESC NULLS LAST, priority
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      maintenance: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -1137,6 +1228,33 @@ router.get('/outages/correlate', async (req, res) => {
         LEFT JOIN energy_consumption ec
           ON ec.usage_date BETWEEN (o.started_at::date - INTERVAL '1 day') AND o.started_at::date
         GROUP BY o.id
+      ),
+      maintenance_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(mo.*)::int AS maintenance_order_count,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(mo.priority, '')) IN ('high', 'critical', 'urgent')
+          )::int AS high_priority_maintenance_count,
+          ROUND(AVG(mo.repair_duration_hours)::numeric, 1) AS avg_repair_duration_hours,
+          ROUND(SUM(mo.downtime_minutes)::numeric, 1) AS maintenance_downtime_minutes,
+          COALESCE(
+            jsonb_object_agg(mo.issue_category, issue_counts.total)
+              FILTER (WHERE mo.issue_category IS NOT NULL),
+            '{}'::jsonb
+          ) AS maintenance_issue_counts
+        FROM limited_outages o
+        LEFT JOIN maintenance_orders mo
+          ON mo.operator = o.operator
+         AND mo.scheduled_date BETWEEN (o.started_at::date - INTERVAL '7 days') AND o.started_at::date
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS total
+          FROM maintenance_orders mo2
+          WHERE mo2.operator = o.operator
+            AND mo2.scheduled_date BETWEEN (o.started_at::date - INTERVAL '7 days') AND o.started_at::date
+            AND mo2.issue_category = mo.issue_category
+        ) issue_counts ON true
+        GROUP BY o.id
       )
       SELECT
         o.id AS outage_id,
@@ -1168,13 +1286,19 @@ router.get('/outages/correlate', async (req, res) => {
         ens.avg_grid_availability_hours,
         ens.avg_generator_runtime_hours,
         ens.total_fuel_consumed_liters,
-        ens.total_carbon_emissions_kg
+        ens.total_carbon_emissions_kg,
+        COALESCE(ms.maintenance_order_count, 0) AS maintenance_order_count,
+        COALESCE(ms.high_priority_maintenance_count, 0) AS high_priority_maintenance_count,
+        ms.avg_repair_duration_hours,
+        ms.maintenance_downtime_minutes,
+        COALESCE(ms.maintenance_issue_counts, '{}'::jsonb) AS maintenance_issue_counts
       FROM limited_outages o
       LEFT JOIN reading_stats rs ON rs.outage_id = o.id
       LEFT JOIN event_stats es ON es.outage_id = o.id
       LEFT JOIN hardware_stats hws ON hws.outage_id = o.id
       LEFT JOIN uptime_stats us ON us.outage_id = o.id
       LEFT JOIN energy_stats ens ON ens.outage_id = o.id
+      LEFT JOIN maintenance_stats ms ON ms.outage_id = o.id
       ORDER BY o.started_at DESC
       `,
       [limit]

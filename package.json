@@ -13,6 +13,7 @@
     "import:hardware": "node scripts/importHardwareSensors.js",
     "import:uptime": "node scripts/importUptimeLogs.js",
     "import:energy": "node scripts/importEnergyConsumption.js",
+    "import:maintenance": "node scripts/importMaintenanceOrders.js",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {

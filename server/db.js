@@ -257,6 +257,36 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_energy_consumption_city         ON energy_consumption(city);
       CREATE INDEX IF NOT EXISTS idx_energy_consumption_power_source ON energy_consumption(power_source);
       CREATE INDEX IF NOT EXISTS idx_energy_consumption_source_tower ON energy_consumption(source_tower_id);
+
+      -- Synthetic maintenance work orders from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS maintenance_orders (
+        id                     SERIAL PRIMARY KEY,
+        work_order_id          VARCHAR(40) NOT NULL UNIQUE,
+        source_tower_id        VARCHAR(40),
+        city                   VARCHAR(60),
+        operator               VARCHAR(20),
+        maintenance_type       VARCHAR(40),
+        issue_category         VARCHAR(60),
+        priority               VARCHAR(20),
+        status                 VARCHAR(30),
+        scheduled_date         DATE,
+        completed_date         DATE,
+        technician_id          VARCHAR(40),
+        repair_duration_hours  DOUBLE PRECISION,
+        parts_replaced         VARCHAR(120),
+        cost_ngn               DOUBLE PRECISION,
+        downtime_minutes       DOUBLE PRECISION,
+        source                 VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic maintenance work orders',
+        imported_at            TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_tower    ON maintenance_orders(source_tower_id);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_city     ON maintenance_orders(city);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_operator ON maintenance_orders(operator);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_type     ON maintenance_orders(maintenance_type);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_issue    ON maintenance_orders(issue_category);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_status   ON maintenance_orders(status);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_orders_sched    ON maintenance_orders(scheduled_date DESC);
     `);
     console.log('✅  Database schema ready');
   } finally {
