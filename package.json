@@ -9,6 +9,7 @@
     "import": "node scripts/importTowers.js",
     "import:qos": "node scripts/importQoS.js",
     "import:coverage": "node scripts/importCoverage.js",
+    "import:events": "node scripts/importNetworkEvents.js",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {

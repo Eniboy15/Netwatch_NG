@@ -450,6 +450,85 @@ router.get('/coverage', async (req, res) => {
   }
 });
 
+// GET /api/events?operator=MTN&city=Lagos&type=congestion&severity=high&limit=200
+// Synthetic ElectricSheep Africa network event logs.
+router.get('/events', async (req, res) => {
+  try {
+    const {
+      operator,
+      city,
+      type,
+      severity,
+      network,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') {
+      conds.push(`operator = $${p++}`);
+      params.push(operator);
+    }
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (type && type !== 'all') {
+      conds.push(`event_type = $${p++}`);
+      params.push(String(type).slice(0, 60));
+    }
+    if (severity && severity !== 'all') {
+      conds.push(`severity = $${p++}`);
+      params.push(String(severity).slice(0, 20));
+    }
+    if (network && network !== 'all') {
+      conds.push(`network = $${p++}`);
+      params.push(normalizeNetwork(network));
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`event_time >= $${p++}`);
+      params.push(fromDate.toISOString());
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`event_time <= $${p++}`);
+      params.push(untilDate.toISOString());
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT event_id, event_time, source_tower_id, city, event_type, severity,
+              affected_users, packet_loss_percent, network, operator, source
+       FROM network_events
+       ${where}
+       ORDER BY event_time DESC
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      events: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -719,6 +798,51 @@ router.get('/outages/correlate', async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10) || 100, 1), 500);
     const { rows } = await pool.query(
       `
+      WITH limited_outages AS (
+        SELECT *
+        FROM outages
+        ORDER BY started_at DESC
+        LIMIT $1
+      ),
+      reading_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(r.*)::int AS sample_count,
+          ROUND(AVG(r.signal_dbm)::numeric, 1) AS pre_avg_signal,
+          ROUND(AVG(r.latency_ms)::numeric, 1) AS pre_avg_latency,
+          ROUND(AVG(r.dl_mbps)::numeric, 1) AS pre_avg_dl
+        FROM limited_outages o
+        LEFT JOIN readings r
+          ON r.operator = o.operator
+         AND r.recorded_at >= o.started_at - INTERVAL '2 hours'
+         AND r.recorded_at < o.started_at
+        GROUP BY o.id
+      ),
+      event_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(ne.*)::int AS pre_event_count,
+          ROUND(AVG(ne.packet_loss_percent)::numeric, 2) AS pre_avg_packet_loss,
+          COALESCE(
+            jsonb_object_agg(ne.event_type, event_counts.total)
+              FILTER (WHERE ne.event_type IS NOT NULL),
+            '{}'::jsonb
+          ) AS pre_event_types
+        FROM limited_outages o
+        LEFT JOIN network_events ne
+          ON ne.operator = o.operator
+         AND ne.event_time >= o.started_at - INTERVAL '2 hours'
+         AND ne.event_time < o.started_at
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS total
+          FROM network_events ne2
+          WHERE ne2.operator = o.operator
+            AND ne2.event_time >= o.started_at - INTERVAL '2 hours'
+            AND ne2.event_time < o.started_at
+            AND ne2.event_type = ne.event_type
+        ) event_counts ON true
+        GROUP BY o.id
+      )
       SELECT
         o.id AS outage_id,
         o.operator,
@@ -727,18 +851,17 @@ router.get('/outages/correlate', async (req, res) => {
         o.started_at,
         o.ended_at,
         o.duration_min,
-        COUNT(r.*)::int AS sample_count,
-        ROUND(AVG(r.signal_dbm)::numeric, 1) AS pre_avg_signal,
-        ROUND(AVG(r.latency_ms)::numeric, 1) AS pre_avg_latency,
-        ROUND(AVG(r.dl_mbps)::numeric, 1) AS pre_avg_dl
-      FROM outages o
-      LEFT JOIN readings r
-        ON r.operator = o.operator
-       AND r.recorded_at >= o.started_at - INTERVAL '2 hours'
-       AND r.recorded_at < o.started_at
-      GROUP BY o.id
+        COALESCE(rs.sample_count, 0) AS sample_count,
+        rs.pre_avg_signal,
+        rs.pre_avg_latency,
+        rs.pre_avg_dl,
+        COALESCE(es.pre_event_count, 0) AS pre_event_count,
+        es.pre_avg_packet_loss,
+        COALESCE(es.pre_event_types, '{}'::jsonb) AS pre_event_types
+      FROM limited_outages o
+      LEFT JOIN reading_stats rs ON rs.outage_id = o.id
+      LEFT JOIN event_stats es ON es.outage_id = o.id
       ORDER BY o.started_at DESC
-      LIMIT $1
       `,
       [limit]
     );

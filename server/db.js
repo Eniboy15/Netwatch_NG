@@ -157,6 +157,29 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_coverage_data_network      ON coverage_data(network);
       CREATE INDEX IF NOT EXISTS idx_coverage_data_latlon       ON coverage_data(lat, lon);
       CREATE INDEX IF NOT EXISTS idx_coverage_data_source_tower ON coverage_data(source_tower_id);
+
+      -- Synthetic network event logs from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS network_events (
+        id                   SERIAL PRIMARY KEY,
+        event_id             VARCHAR(40) NOT NULL UNIQUE,
+        event_time           TIMESTAMP NOT NULL,
+        source_tower_id      VARCHAR(40),
+        city                 VARCHAR(60),
+        event_type           VARCHAR(60),
+        severity             VARCHAR(20),
+        affected_users       INT,
+        packet_loss_percent  DOUBLE PRECISION,
+        network              VARCHAR(10),
+        operator             VARCHAR(20),
+        source               VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic network event logs',
+        imported_at          TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_network_events_time         ON network_events(event_time DESC);
+      CREATE INDEX IF NOT EXISTS idx_network_events_operator     ON network_events(operator);
+      CREATE INDEX IF NOT EXISTS idx_network_events_city         ON network_events(city);
+      CREATE INDEX IF NOT EXISTS idx_network_events_event_type   ON network_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_network_events_source_tower ON network_events(source_tower_id);
     `);
     console.log('✅  Database schema ready');
   } finally {
