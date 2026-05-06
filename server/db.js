@@ -180,6 +180,32 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_network_events_city         ON network_events(city);
       CREATE INDEX IF NOT EXISTS idx_network_events_event_type   ON network_events(event_type);
       CREATE INDEX IF NOT EXISTS idx_network_events_source_tower ON network_events(source_tower_id);
+
+      -- Synthetic hardware sensor readings from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS hardware_sensors (
+        id                    SERIAL PRIMARY KEY,
+        sensor_id             VARCHAR(40) NOT NULL UNIQUE,
+        sensor_time           TIMESTAMP NOT NULL,
+        source_tower_id       VARCHAR(40),
+        city                  VARCHAR(60),
+        equipment_type        VARCHAR(40),
+        temperature_celsius   DOUBLE PRECISION,
+        power_draw_watts      DOUBLE PRECISION,
+        voltage_v             DOUBLE PRECISION,
+        humidity_percent      DOUBLE PRECISION,
+        vibration_level       DOUBLE PRECISION,
+        health_status         VARCHAR(20),
+        alert_triggered       BOOLEAN,
+        source                VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic hardware sensor data',
+        imported_at           TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_hardware_sensors_time         ON hardware_sensors(sensor_time DESC);
+      CREATE INDEX IF NOT EXISTS idx_hardware_sensors_city         ON hardware_sensors(city);
+      CREATE INDEX IF NOT EXISTS idx_hardware_sensors_equipment    ON hardware_sensors(equipment_type);
+      CREATE INDEX IF NOT EXISTS idx_hardware_sensors_health       ON hardware_sensors(health_status);
+      CREATE INDEX IF NOT EXISTS idx_hardware_sensors_alert        ON hardware_sensors(alert_triggered);
+      CREATE INDEX IF NOT EXISTS idx_hardware_sensors_source_tower ON hardware_sensors(source_tower_id);
     `);
     console.log('✅  Database schema ready');
   } finally {

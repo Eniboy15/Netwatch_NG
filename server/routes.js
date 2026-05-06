@@ -529,6 +529,89 @@ router.get('/events', async (req, res) => {
   }
 });
 
+// GET /api/hardware?city=Lagos&tower_id=LAG-1234&alert=true&limit=200
+// Synthetic ElectricSheep Africa tower hardware sensor data.
+router.get('/hardware', async (req, res) => {
+  try {
+    const {
+      city,
+      tower_id,
+      equipment_type,
+      health_status,
+      alert,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (tower_id) {
+      conds.push(`source_tower_id = $${p++}`);
+      params.push(String(tower_id).slice(0, 40));
+    }
+    if (equipment_type && equipment_type !== 'all') {
+      conds.push(`equipment_type = $${p++}`);
+      params.push(String(equipment_type).slice(0, 40));
+    }
+    if (health_status && health_status !== 'all') {
+      conds.push(`health_status = $${p++}`);
+      params.push(String(health_status).slice(0, 20));
+    }
+    if (alert !== undefined && alert !== 'all') {
+      if (!['true', 'false'].includes(String(alert).toLowerCase())) {
+        return res.status(400).json({ error: 'alert must be true or false' });
+      }
+      conds.push(`alert_triggered = $${p++}`);
+      params.push(String(alert).toLowerCase() === 'true');
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`sensor_time >= $${p++}`);
+      params.push(fromDate.toISOString());
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`sensor_time <= $${p++}`);
+      params.push(untilDate.toISOString());
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT sensor_id, sensor_time, source_tower_id, city, equipment_type,
+              temperature_celsius, power_draw_watts, voltage_v, humidity_percent,
+              vibration_level, health_status, alert_triggered, source
+       FROM hardware_sensors
+       ${where}
+       ORDER BY sensor_time DESC
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      sensors: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -842,6 +925,22 @@ router.get('/outages/correlate', async (req, res) => {
             AND ne2.event_type = ne.event_type
         ) event_counts ON true
         GROUP BY o.id
+      ),
+      hardware_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(hs.*)::int AS pre_hardware_sample_count,
+          COUNT(*) FILTER (WHERE hs.alert_triggered = true)::int AS pre_hardware_alert_count,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(hs.health_status, '')) IN ('warning', 'critical', 'fault', 'faulty', 'degraded')
+          )::int AS pre_hardware_bad_health_count,
+          ROUND(AVG(hs.temperature_celsius)::numeric, 1) AS pre_avg_temperature_celsius,
+          ROUND(AVG(hs.power_draw_watts)::numeric, 1) AS pre_avg_power_draw_watts
+        FROM limited_outages o
+        LEFT JOIN hardware_sensors hs
+          ON hs.sensor_time >= o.started_at - INTERVAL '2 hours'
+         AND hs.sensor_time < o.started_at
+        GROUP BY o.id
       )
       SELECT
         o.id AS outage_id,
@@ -857,10 +956,16 @@ router.get('/outages/correlate', async (req, res) => {
         rs.pre_avg_dl,
         COALESCE(es.pre_event_count, 0) AS pre_event_count,
         es.pre_avg_packet_loss,
-        COALESCE(es.pre_event_types, '{}'::jsonb) AS pre_event_types
+        COALESCE(es.pre_event_types, '{}'::jsonb) AS pre_event_types,
+        COALESCE(hws.pre_hardware_sample_count, 0) AS pre_hardware_sample_count,
+        COALESCE(hws.pre_hardware_alert_count, 0) AS pre_hardware_alert_count,
+        COALESCE(hws.pre_hardware_bad_health_count, 0) AS pre_hardware_bad_health_count,
+        hws.pre_avg_temperature_celsius,
+        hws.pre_avg_power_draw_watts
       FROM limited_outages o
       LEFT JOIN reading_stats rs ON rs.outage_id = o.id
       LEFT JOIN event_stats es ON es.outage_id = o.id
+      LEFT JOIN hardware_stats hws ON hws.outage_id = o.id
       ORDER BY o.started_at DESC
       `,
       [limit]

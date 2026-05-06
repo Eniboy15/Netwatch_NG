@@ -10,6 +10,7 @@
     "import:qos": "node scripts/importQoS.js",
     "import:coverage": "node scripts/importCoverage.js",
     "import:events": "node scripts/importNetworkEvents.js",
+    "import:hardware": "node scripts/importHardwareSensors.js",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {
