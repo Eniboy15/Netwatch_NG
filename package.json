@@ -14,6 +14,7 @@
     "import:uptime": "node scripts/importUptimeLogs.js",
     "import:energy": "node scripts/importEnergyConsumption.js",
     "import:maintenance": "node scripts/importMaintenanceOrders.js",
+    "import:latency": "node scripts/importLatencyLogs.js",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {

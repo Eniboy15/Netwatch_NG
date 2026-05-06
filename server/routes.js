@@ -860,6 +860,87 @@ router.get('/maintenance', async (req, res) => {
   }
 });
 
+// GET /api/latency?operator=MTN&city=Lagos&network=5G&limit=200
+// Synthetic ElectricSheep Africa ultra-low-latency logs.
+router.get('/latency', async (req, res) => {
+  try {
+    const {
+      operator,
+      city,
+      network,
+      tower_id,
+      application_type,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') {
+      conds.push(`operator = $${p++}`);
+      params.push(operator);
+    }
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (network && network !== 'all') {
+      conds.push(`network = $${p++}`);
+      params.push(normalizeNetwork(network));
+    }
+    if (tower_id) {
+      conds.push(`source_tower_id = $${p++}`);
+      params.push(String(tower_id).slice(0, 40));
+    }
+    if (application_type && application_type !== 'all') {
+      conds.push(`application_type = $${p++}`);
+      params.push(String(application_type).slice(0, 60));
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`measured_at >= $${p++}`);
+      params.push(fromDate.toISOString());
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`measured_at <= $${p++}`);
+      params.push(untilDate.toISOString());
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT log_id, measured_at, source_tower_id, city, operator, network,
+              application_type, latency_ms, jitter_ms, packet_loss_percent,
+              throughput_mbps, edge_server_id, edge_distance_km, sla_target_ms,
+              sla_met, reliability_percent, active_connections, source
+       FROM latency_logs
+       ${where}
+       ORDER BY measured_at DESC
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      latency_logs: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -1255,6 +1336,21 @@ router.get('/outages/correlate', async (req, res) => {
             AND mo2.issue_category = mo.issue_category
         ) issue_counts ON true
         GROUP BY o.id
+      ),
+      latency_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(ll.*)::int AS latency_log_count,
+          ROUND(AVG(ll.latency_ms)::numeric, 2) AS avg_ultra_latency_ms,
+          ROUND(AVG(ll.jitter_ms)::numeric, 2) AS avg_ultra_jitter_ms,
+          ROUND(AVG(ll.packet_loss_percent)::numeric, 2) AS avg_ultra_packet_loss_percent,
+          COUNT(*) FILTER (WHERE ll.sla_met = false)::int AS latency_sla_miss_count
+        FROM limited_outages o
+        LEFT JOIN latency_logs ll
+          ON ll.operator = o.operator
+         AND ll.measured_at >= o.started_at - INTERVAL '2 hours'
+         AND ll.measured_at < o.started_at
+        GROUP BY o.id
       )
       SELECT
         o.id AS outage_id,
@@ -1291,7 +1387,12 @@ router.get('/outages/correlate', async (req, res) => {
         COALESCE(ms.high_priority_maintenance_count, 0) AS high_priority_maintenance_count,
         ms.avg_repair_duration_hours,
         ms.maintenance_downtime_minutes,
-        COALESCE(ms.maintenance_issue_counts, '{}'::jsonb) AS maintenance_issue_counts
+        COALESCE(ms.maintenance_issue_counts, '{}'::jsonb) AS maintenance_issue_counts,
+        COALESCE(ls.latency_log_count, 0) AS latency_log_count,
+        ls.avg_ultra_latency_ms,
+        ls.avg_ultra_jitter_ms,
+        ls.avg_ultra_packet_loss_percent,
+        COALESCE(ls.latency_sla_miss_count, 0) AS latency_sla_miss_count
       FROM limited_outages o
       LEFT JOIN reading_stats rs ON rs.outage_id = o.id
       LEFT JOIN event_stats es ON es.outage_id = o.id
@@ -1299,6 +1400,7 @@ router.get('/outages/correlate', async (req, res) => {
       LEFT JOIN uptime_stats us ON us.outage_id = o.id
       LEFT JOIN energy_stats ens ON ens.outage_id = o.id
       LEFT JOIN maintenance_stats ms ON ms.outage_id = o.id
+      LEFT JOIN latency_stats ls ON ls.outage_id = o.id
       ORDER BY o.started_at DESC
       `,
       [limit]

@@ -287,6 +287,36 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_maintenance_orders_issue    ON maintenance_orders(issue_category);
       CREATE INDEX IF NOT EXISTS idx_maintenance_orders_status   ON maintenance_orders(status);
       CREATE INDEX IF NOT EXISTS idx_maintenance_orders_sched    ON maintenance_orders(scheduled_date DESC);
+
+      -- Synthetic ultra-low-latency records from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS latency_logs (
+        id                    SERIAL PRIMARY KEY,
+        log_id                VARCHAR(40) NOT NULL UNIQUE,
+        measured_at           TIMESTAMP NOT NULL,
+        source_tower_id       VARCHAR(40),
+        city                  VARCHAR(60),
+        operator              VARCHAR(20),
+        network               VARCHAR(10),
+        application_type      VARCHAR(60),
+        latency_ms            DOUBLE PRECISION,
+        jitter_ms             DOUBLE PRECISION,
+        packet_loss_percent   DOUBLE PRECISION,
+        throughput_mbps       DOUBLE PRECISION,
+        edge_server_id        VARCHAR(40),
+        edge_distance_km      DOUBLE PRECISION,
+        sla_target_ms         DOUBLE PRECISION,
+        sla_met               BOOLEAN,
+        reliability_percent   DOUBLE PRECISION,
+        active_connections    INT,
+        source                VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic ultra-low-latency logs',
+        imported_at           TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_latency_logs_measured_at ON latency_logs(measured_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_latency_logs_tower       ON latency_logs(source_tower_id);
+      CREATE INDEX IF NOT EXISTS idx_latency_logs_city        ON latency_logs(city);
+      CREATE INDEX IF NOT EXISTS idx_latency_logs_operator    ON latency_logs(operator);
+      CREATE INDEX IF NOT EXISTS idx_latency_logs_network     ON latency_logs(network);
     `);
     console.log('✅  Database schema ready');
   } finally {
