@@ -12,6 +12,7 @@
     "import:events": "node scripts/importNetworkEvents.js",
     "import:hardware": "node scripts/importHardwareSensors.js",
     "import:uptime": "node scripts/importUptimeLogs.js",
+    "import:energy": "node scripts/importEnergyConsumption.js",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {

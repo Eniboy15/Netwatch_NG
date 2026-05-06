@@ -232,6 +232,31 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_uptime_logs_state         ON uptime_logs(state);
       CREATE INDEX IF NOT EXISTS idx_uptime_logs_outage_reason ON uptime_logs(outage_reason);
       CREATE INDEX IF NOT EXISTS idx_uptime_logs_source_tower  ON uptime_logs(source_tower_id);
+
+      -- Synthetic tower energy records from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS energy_consumption (
+        id                       SERIAL PRIMARY KEY,
+        source_tower_id          VARCHAR(40) NOT NULL,
+        usage_date               DATE NOT NULL,
+        city                     VARCHAR(60),
+        power_source             VARCHAR(40),
+        daily_consumption_kwh    DOUBLE PRECISION,
+        cost_per_kwh_ngn         DOUBLE PRECISION,
+        total_cost_ngn           DOUBLE PRECISION,
+        grid_availability_hours  INT,
+        generator_runtime_hours  INT,
+        solar_generation_kwh     DOUBLE PRECISION,
+        fuel_consumed_liters     DOUBLE PRECISION,
+        carbon_emissions_kg      DOUBLE PRECISION,
+        source                   VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic tower energy records',
+        imported_at              TIMESTAMP DEFAULT NOW(),
+        UNIQUE(source_tower_id, usage_date, power_source)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_energy_consumption_date         ON energy_consumption(usage_date DESC);
+      CREATE INDEX IF NOT EXISTS idx_energy_consumption_city         ON energy_consumption(city);
+      CREATE INDEX IF NOT EXISTS idx_energy_consumption_power_source ON energy_consumption(power_source);
+      CREATE INDEX IF NOT EXISTS idx_energy_consumption_source_tower ON energy_consumption(source_tower_id);
     `);
     console.log('✅  Database schema ready');
   } finally {

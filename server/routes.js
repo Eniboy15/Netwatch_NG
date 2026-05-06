@@ -697,6 +697,78 @@ router.get('/uptime', async (req, res) => {
   }
 });
 
+// GET /api/energy?city=Lagos&tower_id=LAG-1234&power_source=generator&limit=200
+// Synthetic ElectricSheep Africa tower energy consumption records.
+router.get('/energy', async (req, res) => {
+  try {
+    const {
+      city,
+      tower_id,
+      power_source,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (city && city !== 'all') {
+      conds.push(`city = $${p++}`);
+      params.push(city);
+    }
+    if (tower_id) {
+      conds.push(`source_tower_id = $${p++}`);
+      params.push(String(tower_id).slice(0, 40));
+    }
+    if (power_source && power_source !== 'all') {
+      conds.push(`power_source = $${p++}`);
+      params.push(String(power_source).slice(0, 40));
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`usage_date >= $${p++}`);
+      params.push(fromDate.toISOString().slice(0, 10));
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`usage_date <= $${p++}`);
+      params.push(untilDate.toISOString().slice(0, 10));
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT source_tower_id, usage_date, city, power_source,
+              daily_consumption_kwh, cost_per_kwh_ngn, total_cost_ngn,
+              grid_availability_hours, generator_runtime_hours,
+              solar_generation_kwh, fuel_consumed_liters,
+              carbon_emissions_kg, source
+       FROM energy_consumption
+       ${where}
+       ORDER BY usage_date DESC, daily_consumption_kwh DESC NULLS LAST
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      energy: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -1051,6 +1123,20 @@ router.get('/outages/correlate', async (req, res) => {
             AND ul2.outage_reason = ul.outage_reason
         ) reason_counts ON true
         GROUP BY o.id
+      ),
+      energy_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(ec.*)::int AS energy_record_count,
+          ROUND(AVG(ec.daily_consumption_kwh)::numeric, 2) AS avg_daily_consumption_kwh,
+          ROUND(AVG(ec.grid_availability_hours)::numeric, 1) AS avg_grid_availability_hours,
+          ROUND(AVG(ec.generator_runtime_hours)::numeric, 1) AS avg_generator_runtime_hours,
+          ROUND(SUM(ec.fuel_consumed_liters)::numeric, 1) AS total_fuel_consumed_liters,
+          ROUND(SUM(ec.carbon_emissions_kg)::numeric, 1) AS total_carbon_emissions_kg
+        FROM limited_outages o
+        LEFT JOIN energy_consumption ec
+          ON ec.usage_date BETWEEN (o.started_at::date - INTERVAL '1 day') AND o.started_at::date
+        GROUP BY o.id
       )
       SELECT
         o.id AS outage_id,
@@ -1076,12 +1162,19 @@ router.get('/outages/correlate', async (req, res) => {
         us.avg_uptime_percentage,
         us.total_downtime_minutes,
         COALESCE(us.total_synthetic_outages, 0) AS total_synthetic_outages,
-        COALESCE(us.outage_reason_counts, '{}'::jsonb) AS outage_reason_counts
+        COALESCE(us.outage_reason_counts, '{}'::jsonb) AS outage_reason_counts,
+        COALESCE(ens.energy_record_count, 0) AS energy_record_count,
+        ens.avg_daily_consumption_kwh,
+        ens.avg_grid_availability_hours,
+        ens.avg_generator_runtime_hours,
+        ens.total_fuel_consumed_liters,
+        ens.total_carbon_emissions_kg
       FROM limited_outages o
       LEFT JOIN reading_stats rs ON rs.outage_id = o.id
       LEFT JOIN event_stats es ON es.outage_id = o.id
       LEFT JOIN hardware_stats hws ON hws.outage_id = o.id
       LEFT JOIN uptime_stats us ON us.outage_id = o.id
+      LEFT JOIN energy_stats ens ON ens.outage_id = o.id
       ORDER BY o.started_at DESC
       `,
       [limit]
