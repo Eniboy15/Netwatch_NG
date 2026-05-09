@@ -941,6 +941,93 @@ router.get('/latency', async (req, res) => {
   }
 });
 
+// GET /api/handovers?operator=MTN&city=Lagos&success=false&limit=200
+// Synthetic ElectricSheep Africa cell-tower handover records.
+router.get('/handovers', async (req, res) => {
+  try {
+    const {
+      operator,
+      city,
+      network,
+      tower_id,
+      success,
+      from,
+      until,
+      limit = 200,
+    } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') {
+      conds.push(`operator = $${p++}`);
+      params.push(operator);
+    }
+    if (city && city !== 'all') {
+      conds.push(`(source_city = $${p} OR target_city = $${p})`);
+      params.push(city);
+      p++;
+    }
+    if (network && network !== 'all') {
+      conds.push(`network = $${p++}`);
+      params.push(normalizeNetwork(network));
+    }
+    if (tower_id) {
+      conds.push(`(source_tower_id = $${p} OR target_tower_id = $${p})`);
+      params.push(String(tower_id).slice(0, 40));
+      p++;
+    }
+    if (success !== undefined && success !== 'all') {
+      if (!['true', 'false'].includes(String(success).toLowerCase())) {
+        return res.status(400).json({ error: 'success must be true or false' });
+      }
+      conds.push(`success = $${p++}`);
+      params.push(String(success).toLowerCase() === 'true');
+    }
+    if (from) {
+      const fromDate = new Date(from);
+      if (Number.isNaN(fromDate.getTime())) {
+        return res.status(400).json({ error: 'from must be a valid date/time' });
+      }
+      conds.push(`handover_time >= $${p++}`);
+      params.push(fromDate.toISOString());
+    }
+    if (until) {
+      const untilDate = new Date(until);
+      if (Number.isNaN(untilDate.getTime())) {
+        return res.status(400).json({ error: 'until must be a valid date/time' });
+      }
+      conds.push(`handover_time <= $${p++}`);
+      params.push(untilDate.toISOString());
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+
+    const { rows } = await pool.query(
+      `SELECT handover_id, handover_time, source_tower_id, target_tower_id,
+              source_city, target_city, operator, network, handover_type,
+              success, duration_ms, source_signal_dbm, target_signal_dbm,
+              failure_reason, active_call, active_data_session,
+              device_speed_kmh, source
+       FROM handover_records
+       ${where}
+       ORDER BY handover_time DESC
+       LIMIT $${p}`,
+      params
+    );
+
+    res.json({
+      count: rows.length,
+      source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+      handovers: rows,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -1351,6 +1438,21 @@ router.get('/outages/correlate', async (req, res) => {
          AND ll.measured_at >= o.started_at - INTERVAL '2 hours'
          AND ll.measured_at < o.started_at
         GROUP BY o.id
+      ),
+      handover_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(hr.*)::int AS handover_count,
+          COUNT(*) FILTER (WHERE hr.success = false)::int AS handover_failure_count,
+          ROUND(AVG(hr.duration_ms)::numeric, 1) AS avg_handover_duration_ms,
+          ROUND(AVG(hr.source_signal_dbm)::numeric, 1) AS avg_handover_source_signal_dbm,
+          ROUND(AVG(hr.target_signal_dbm)::numeric, 1) AS avg_handover_target_signal_dbm
+        FROM limited_outages o
+        LEFT JOIN handover_records hr
+          ON hr.operator = o.operator
+         AND hr.handover_time >= o.started_at - INTERVAL '2 hours'
+         AND hr.handover_time < o.started_at
+        GROUP BY o.id
       )
       SELECT
         o.id AS outage_id,
@@ -1392,7 +1494,12 @@ router.get('/outages/correlate', async (req, res) => {
         ls.avg_ultra_latency_ms,
         ls.avg_ultra_jitter_ms,
         ls.avg_ultra_packet_loss_percent,
-        COALESCE(ls.latency_sla_miss_count, 0) AS latency_sla_miss_count
+        COALESCE(ls.latency_sla_miss_count, 0) AS latency_sla_miss_count,
+        COALESCE(hds.handover_count, 0) AS handover_count,
+        COALESCE(hds.handover_failure_count, 0) AS handover_failure_count,
+        hds.avg_handover_duration_ms,
+        hds.avg_handover_source_signal_dbm,
+        hds.avg_handover_target_signal_dbm
       FROM limited_outages o
       LEFT JOIN reading_stats rs ON rs.outage_id = o.id
       LEFT JOIN event_stats es ON es.outage_id = o.id
@@ -1401,6 +1508,7 @@ router.get('/outages/correlate', async (req, res) => {
       LEFT JOIN energy_stats ens ON ens.outage_id = o.id
       LEFT JOIN maintenance_stats ms ON ms.outage_id = o.id
       LEFT JOIN latency_stats ls ON ls.outage_id = o.id
+      LEFT JOIN handover_stats hds ON hds.outage_id = o.id
       ORDER BY o.started_at DESC
       `,
       [limit]

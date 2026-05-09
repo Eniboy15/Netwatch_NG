@@ -317,6 +317,38 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_latency_logs_city        ON latency_logs(city);
       CREATE INDEX IF NOT EXISTS idx_latency_logs_operator    ON latency_logs(operator);
       CREATE INDEX IF NOT EXISTS idx_latency_logs_network     ON latency_logs(network);
+
+      -- Synthetic cell-tower handover records from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS handover_records (
+        id                         SERIAL PRIMARY KEY,
+        handover_id                VARCHAR(40) NOT NULL UNIQUE,
+        handover_time              TIMESTAMP NOT NULL,
+        source_tower_id            VARCHAR(40),
+        target_tower_id            VARCHAR(40),
+        source_city                VARCHAR(60),
+        target_city                VARCHAR(60),
+        operator                   VARCHAR(20),
+        network                    VARCHAR(10),
+        handover_type              VARCHAR(40),
+        success                    BOOLEAN,
+        duration_ms                DOUBLE PRECISION,
+        source_signal_dbm          DOUBLE PRECISION,
+        target_signal_dbm          DOUBLE PRECISION,
+        failure_reason             VARCHAR(80),
+        active_call                BOOLEAN,
+        active_data_session        BOOLEAN,
+        device_speed_kmh           DOUBLE PRECISION,
+        source                     VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic cell-tower handover data',
+        imported_at                TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_handover_records_time      ON handover_records(handover_time DESC);
+      CREATE INDEX IF NOT EXISTS idx_handover_records_operator  ON handover_records(operator);
+      CREATE INDEX IF NOT EXISTS idx_handover_records_network   ON handover_records(network);
+      CREATE INDEX IF NOT EXISTS idx_handover_records_success   ON handover_records(success);
+      CREATE INDEX IF NOT EXISTS idx_handover_records_source    ON handover_records(source_tower_id);
+      CREATE INDEX IF NOT EXISTS idx_handover_records_target    ON handover_records(target_tower_id);
+      CREATE INDEX IF NOT EXISTS idx_handover_records_cities    ON handover_records(source_city, target_city);
     `);
     console.log('✅  Database schema ready');
   } finally {
