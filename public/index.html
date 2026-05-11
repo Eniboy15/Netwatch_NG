@@ -143,6 +143,12 @@
   .factor-top{display:flex;justify-content:space-between;gap:10px}
   .factor-src{margin-top:3px;color:var(--txt3);font-size:11px}
   .source-note{font-size:11px;color:var(--txt2);line-height:1.4;margin-top:8px}
+  .synth-grid{padding:0 12px 12px;display:grid;grid-template-columns:repeat(6,1fr);gap:10px;border-bottom:0.5px solid var(--bdr);background:var(--bg)}
+  .synth-card{background:var(--bg2);border:0.5px solid var(--bdr);border-radius:10px;padding:10px;min-width:0}
+  .synth-k{font-size:10px;color:var(--txt2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .synth-v{margin-top:4px;font-size:17px;font-weight:600;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .synth-tag{display:inline-flex;margin-top:6px;padding:2px 6px;border-radius:4px;background:#e6f1fb;color:#185FA5;font-size:10px;font-weight:600}
+  .risk-map-note{font-size:11px;color:var(--txt2);margin-top:6px;line-height:1.35}
 
   /* ── SPEED TEST ── */
   #p-speedtest{flex-direction:column;overflow-y:auto;background:var(--bg2)}
@@ -196,7 +202,7 @@
     .dl-bar { flex-wrap: wrap; }
     .dl-bar .nbtn { flex: 1; text-align: center; }
     
-    .out-grid, .pred-grid { grid-template-columns: 1fr 1fr; }
+    .out-grid, .pred-grid, .synth-grid { grid-template-columns: 1fr 1fr; }
     .out-main, .pred-main { grid-template-columns: 1fr; }
     
     .st-gauges { flex-direction: column; gap: 16px; align-items: center; }
@@ -275,6 +281,8 @@
         <div class="leg-row"><div class="leg-dot" style="background:#185FA5"></div>Good (−70 to −85)</div>
         <div class="leg-row"><div class="leg-dot" style="background:#BA7517"></div>Fair (−85 to −100)</div>
         <div class="leg-row"><div class="leg-dot" style="background:#A32D2D"></div>Poor (&lt;−100 dBm)</div>
+        <div class="leg-row"><div class="leg-dot" style="background:#BA7517;border:2px solid #A32D2D"></div>Outage-risk overlay</div>
+        <div class="risk-map-note">Risk markers use the baseline score and include synthetic training signals.</div>
       </div>
       <div class="sb-sec" id="twr-det">
         <div class="sb-ttl">Selected tower</div>
@@ -329,13 +337,21 @@
       <div class="out-bar">
         <span style="font-size:12px;color:var(--txt2)">Outage-risk baseline</span>
         <div style="flex:1"></div>
-        <button class="nbtn" onclick="loadOutageRisk().catch(()=>{})">Refresh</button>
+        <button class="nbtn" onclick="refreshPredictions().catch(()=>{})">Refresh</button>
       </div>
       <div class="pred-grid">
         <div class="out-card"><div class="out-l">Highest risk</div><div class="out-v" id="pred-top">-</div></div>
         <div class="out-card"><div class="out-l">Average risk score</div><div class="out-v" id="pred-avg">0</div></div>
         <div class="out-card"><div class="out-l">High-risk providers</div><div class="out-v" id="pred-high">0</div></div>
         <div class="out-card"><div class="out-l">Model confidence</div><div class="out-v" id="pred-conf">-</div></div>
+      </div>
+      <div class="synth-grid">
+        <div class="synth-card"><div class="synth-k">QoS latency</div><div class="synth-v" id="syn-qos">-</div><div class="synth-tag">Synthetic</div></div>
+        <div class="synth-card"><div class="synth-k">Coverage signal</div><div class="synth-v" id="syn-cov">-</div><div class="synth-tag">Synthetic</div></div>
+        <div class="synth-card"><div class="synth-k">Energy grid/gen</div><div class="synth-v" id="syn-energy">-</div><div class="synth-tag">Synthetic</div></div>
+        <div class="synth-card"><div class="synth-k">Maintenance priority</div><div class="synth-v" id="syn-maint">-</div><div class="synth-tag">Synthetic</div></div>
+        <div class="synth-card"><div class="synth-k">Dropped calls</div><div class="synth-v" id="syn-drop">-</div><div class="synth-tag">Synthetic</div></div>
+        <div class="synth-card"><div class="synth-k">Technician activity</div><div class="synth-v" id="syn-tech">-</div><div class="synth-tag">Synthetic</div></div>
       </div>
       <div class="pred-main">
         <div class="pred-panel">
@@ -472,6 +488,8 @@ let searchPlaceMarkers = null;
 let selectedPlace = null;
 let towerCoverageCircle = null;
 let selectedTowerId = null;
+let riskMarkerLayer = null;
+let SYNTHETIC_SUMMARY = {};
 
 // ═══════════════════════════════════════════════════════════
 //  API HEALTH CHECK
@@ -610,6 +628,7 @@ function ingestExternalReadings(rows){
   updKPIs();
   updMap();
   applyF();
+  updateOutageRiskMarkers();
 }
 
 async function syncLatestReadings(){
@@ -644,6 +663,7 @@ function initMap(){
     }),
   };
   setMapStyle('standard');
+  riskMarkerLayer = L.layerGroup().addTo(map);
   TOWERS.forEach(t=>{
     const m = L.circleMarker([t.la,t.lo],{radius:4,fillColor:'#888',color:'#fff',weight:1,fillOpacity:.8}).addTo(map);
     m.bindTooltip('', { direction:'top', sticky:true, opacity:0.95, className:'nw-tt' });
@@ -861,10 +881,14 @@ function renderRecommendationResult(data, label){
     return;
   }
   const top = data.providers.slice(0, 3);
+  const sourceLine = data.source_note
+    ? `<div class="synth-tag" style="margin-top:7px">Synthetic fallback</div><div style="margin-top:4px;color:var(--txt3)">${data.source_note}</div>`
+    : '';
   el.innerHTML = `
     <div><strong>Destination:</strong> ${label}</div>
     <div><strong>Confidence:</strong> ${data.confidence}</div>
     ${top.map((p, i) => `<div style="margin-top:5px"><strong>#${i+1} ${p.operator}</strong> — score ${p.score} | ${p.avg_signal} dBm | ${p.avg_latency} ms | ${p.avg_dl} Mbps</div>`).join('')}
+    ${sourceLine}
   `;
 }
 
@@ -1090,6 +1114,75 @@ function riskChip(r){
   return `<span class="risk-chip" style="background:${bg};color:${c}">${r.band}</span>`;
 }
 
+function avg(rows, key){
+  const vals = (rows || []).map(r=>Number(r[key])).filter(Number.isFinite);
+  return vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : null;
+}
+
+function countWhere(rows, fn){
+  return (rows || []).filter(fn).length;
+}
+
+function setSyntheticCard(id, value){
+  const el = document.getElementById(id);
+  if(el) el.textContent = value;
+}
+
+async function fetchDataset(path){
+  const res = await fetch(`${API}${path}`);
+  if(!res.ok) throw new Error(path);
+  return res.json();
+}
+
+async function loadSyntheticSummary(){
+  const [qos, coverage, energy, maintenance, dropped, technicians] = await Promise.allSettled([
+    fetchDataset('/qos?limit=200'),
+    fetchDataset('/coverage?limit=200'),
+    fetchDataset('/energy?limit=200'),
+    fetchDataset('/maintenance?limit=200'),
+    fetchDataset('/dropped-calls?limit=200'),
+    fetchDataset('/technicians?limit=200'),
+  ]);
+
+  const qRows = qos.value?.metrics || [];
+  const cRows = coverage.value?.coverage || [];
+  const eRows = energy.value?.energy || [];
+  const mRows = maintenance.value?.maintenance || [];
+  const dRows = dropped.value?.dropped_calls || [];
+  const tRows = technicians.value?.technician_logs || [];
+
+  const qLat = avg(qRows, 'latency_ms');
+  const cSig = avg(cRows, 'signal_strength_dbm');
+  const grid = avg(eRows, 'grid_availability_hours');
+  const gen = avg(eRows, 'generator_runtime_hours');
+  const highMaint = countWhere(mRows, r=>['high','critical','urgent'].includes(String(r.priority || '').toLowerCase()));
+  const unresolvedTech = countWhere(tRows, r=>r.issue_resolved === false || String(r.status || '').toLowerCase() !== 'completed');
+
+  SYNTHETIC_SUMMARY = {
+    source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.',
+    qos_count: qRows.length,
+    coverage_count: cRows.length,
+    energy_count: eRows.length,
+    maintenance_count: mRows.length,
+    dropped_count: dRows.length,
+    technician_count: tRows.length,
+  };
+
+  setSyntheticCard('syn-qos', qLat === null ? '-' : `${Math.round(qLat)} ms`);
+  setSyntheticCard('syn-cov', cSig === null ? '-' : `${Math.round(cSig)} dBm`);
+  setSyntheticCard('syn-energy', grid === null ? '-' : `${Math.round(grid)}h/${Math.round(gen || 0)}h`);
+  setSyntheticCard('syn-maint', `${highMaint}/${mRows.length}`);
+  setSyntheticCard('syn-drop', dRows.length.toLocaleString());
+  setSyntheticCard('syn-tech', `${unresolvedTech}/${tRows.length}`);
+}
+
+async function refreshPredictions(){
+  await Promise.all([
+    loadOutageRisk(),
+    loadSyntheticSummary(),
+  ]);
+}
+
 async function loadOutageRisk(){
   const res = await fetch(`${API}/outages/risk?hours=6`);
   if(!res.ok) throw new Error('Risk data unavailable');
@@ -1097,6 +1190,7 @@ async function loadOutageRisk(){
   OUTAGE_RISK = data.risks || [];
   OUTAGE_RISK_META = data || {};
   renderOutageRisk();
+  updateOutageRiskMarkers();
 }
 
 function renderOutageRisk(){
@@ -1133,6 +1227,47 @@ function renderOutageRisk(){
     </div>
   `).join('') : '<div style="font-size:12px;color:var(--txt2)">No dominant risk factors yet.</div>';
   document.getElementById('risk-source-note').textContent = OUTAGE_RISK_META.source_note || '';
+}
+
+function updateOutageRiskMarkers(){
+  if(!map || !riskMarkerLayer) return;
+  riskMarkerLayer.clearLayers();
+  if(!OUTAGE_RISK.length || !TOWERS.length) return;
+
+  const byOperator = new Map(OUTAGE_RISK.map(r=>[r.operator, r]));
+  const candidates = TOWERS
+    .map(t=>{
+      const risk = byOperator.get(t.prov);
+      if(!risk || Number(risk.score || 0) < 45) return null;
+      const reading = TL[t.id];
+      const signal = Number(reading?.signal_dbm ?? t.sb ?? -95);
+      return { t, risk, signal };
+    })
+    .filter(Boolean)
+    .sort((a,b)=>Number(b.risk.score || 0)-Number(a.risk.score || 0) || a.signal-b.signal)
+    .slice(0, 90);
+
+  candidates.forEach(({t, risk, signal})=>{
+    const color = riskColor(risk.score);
+    const marker = L.circleMarker([t.la, t.lo], {
+      radius: Math.min(11, 5 + Number(risk.score || 0) / 18),
+      color,
+      weight: 1.5,
+      fillColor: color,
+      fillOpacity: 0.12,
+      opacity: 0.8,
+      dashArray: '3 3'
+    }).addTo(riskMarkerLayer);
+    marker.bindTooltip(`
+      <div style="font-size:12px;line-height:1.4">
+        <strong>${t.prov} outage risk</strong><br>
+        Score: ${Math.round(Number(risk.score || 0))}/100 (${risk.band})<br>
+        Tower: ${t.cid || t.id}<br>
+        Signal basis: ${Math.round(signal)} dBm<br>
+        Synthetic + live baseline
+      </div>
+    `, { direction:'top', sticky:true, opacity:0.95 });
+  });
 }
 
 async function loadOutages(){
@@ -1394,7 +1529,7 @@ function sw(name, el){
   document.getElementById(`p-${name}`).classList.add('on');
   if(name==='analytics') updCharts();
   if(name==='patterns')  updPatterns();
-  if(name==='predictions') loadOutageRisk().catch(()=>{});
+  if(name==='predictions') refreshPredictions().catch(()=>{});
   if(name==='outages')   loadOutages().catch(()=>{});
   if(name==='map')       setTimeout(()=>map.invalidateSize(),50);
   if(name==='speedtest'){drawGauge('g-dl',curDL||0,200,'#1D9E75');drawGauge('g-ul',curUL||0,100,'#185FA5');drawPingGauge('g-ping',curPing||0);}
@@ -1416,7 +1551,7 @@ window.addEventListener('load', async ()=>{
   searchPlaceMarkers = L.layerGroup().addTo(map);
   initCharts();
   loadOutages().catch(()=>{});
-  loadOutageRisk().catch(()=>{});
+  refreshPredictions().catch(()=>{});
 
   if (SIMULATION_ON || !apiOnline){
     // warm up with initial simulated readings
@@ -1435,7 +1570,7 @@ window.addEventListener('load', async ()=>{
   setInterval(()=>{
     if(document.getElementById('p-analytics').classList.contains('on')) updCharts();
     if(document.getElementById('p-patterns').classList.contains('on'))  updPatterns();
-    if(document.getElementById('p-predictions').classList.contains('on')) loadOutageRisk().catch(()=>{});
+    if(document.getElementById('p-predictions').classList.contains('on')) refreshPredictions().catch(()=>{});
     if(document.getElementById('p-outages').classList.contains('on'))   loadOutages().catch(()=>{});
   }, 5000);
 });

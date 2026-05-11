@@ -3,103 +3,201 @@
 ### 1) Project Purpose
 Build a Nigeria-focused telecom monitoring platform that:
 - maps cell towers
-- ingests network telemetry
+- ingests live mobile network telemetry
 - visualizes network quality
 - ranks providers by location
-- stores historical data for outage/prediction work
+- stores historical and synthetic training data for outage prediction
 
-Current architecture is web-first (no required dedicated mobile app yet).
+Current architecture is web-first. No dedicated mobile app is required yet.
 
 ---
 
-### 2) Stack + Structure
+### 2) Stack and Structure
 - Frontend: single-file dashboard at `public/index.html`
 - Backend: Node.js + Express
   - `server/index.js`
   - `server/routes.js`
   - `server/db.js`
-- DB: PostgreSQL
-- Data import: `scripts/importTowers.js`
-- IODA sync: `scripts/syncIODA.js`
+- Database: PostgreSQL on Supabase
+- Deployment: Render
+- Data import scripts: `scripts/`
 
 Core folders:
-- `data/621.csv` (OpenCelliD Nigeria raw CSV, no headers)
+- `data/`
 - `public/`
 - `server/`
 - `scripts/`
 
+Important local data files are intentionally ignored by Git:
+- `.env`
+- `data/*.csv`
+- `node_modules/`
+- `*.log`
+
+The dataset CSVs should live locally in `data/` and the imported rows should live in Supabase, not GitHub.
+
 ---
 
-### 3) Database State and Schema
-Tables in active design:
+### 3) Main Database Tables
+`bootstrap()` in `server/db.js` auto-creates tables and indexes on server start.
+
+Core app tables:
 1. `towers`
 2. `readings`
 3. `speed_tests`
-4. `outages` (IODA integration groundwork)
+4. `outages`
 
-`bootstrap()` in `server/db.js` auto-creates all tables + indexes on server start.
+Synthetic ElectricSheep Africa / Amon Din tables added:
+1. `qos_metrics`
+2. `coverage_data`
+3. `network_events`
+4. `hardware_sensors`
+5. `uptime_logs`
+6. `energy_consumption`
+7. `maintenance_orders`
+8. `latency_logs`
+9. `handover_records`
+10. `dropped_calls`
+11. `mobility_traces`
+12. `network_penetration`
+13. `technician_logs`
 
 Important:
 - `towers` has unique `(cell_id, lac, mnc)`
 - `readings.tower_id` references `towers.id`
-- `outages` has dedupe unique index on source/entity/operator/signal/time tuple
+- `outages` has a unique dedupe index on source/entity/operator/signal/time tuple
+- Synthetic tower IDs are stored as `source_tower_id` because they are labels like `CAL-6586`, not numeric OpenCelliD IDs
+- All synthetic datasets must be labeled as synthetic training data in any UI that surfaces them
 
 ---
 
-### 4) Data Sources in Use
-1. OpenCelliD static tower base (`621.csv`)
-2. Simulated telemetry (legacy fallback mode)
-3. Real phone uploads (now active path via MacroDroid + HTTP Shortcuts)
-4. IODA outage feed integration code exists but external connectivity to IODA endpoint has been unreliable from user environment
+### 4) Data Sources
+1. OpenCelliD Nigeria tower CSV: `data/621.csv`
+2. Live phone uploads through MacroDroid + HTTP Shortcuts
+3. Legacy simulated telemetry fallback
+4. IODA outage feed groundwork
+5. ElectricSheep Africa / Amon Din synthetic telecom datasets from Hugging Face
+
+The ElectricSheep datasets are synthetic and generated to model Nigerian telecom behavior. They are useful for baseline analytics and model training, but they are not real measured network data.
 
 ---
 
-### 5) Key Backend Features Implemented
+### 5) Import Scripts and Commands
+Existing:
+- `npm run import` -> `scripts/importTowers.js`
+- `npm run sync:ioda` -> `scripts/syncIODA.js`
 
-#### A) Reading ingestion hardening
-- `POST /api/readings` (bulk)
-- `POST /api/readings/device` (single device-friendly)
-- Validation + normalization:
-  - `signal_dbm` required numeric
-  - bounds/clamps applied to numeric fields
-- Optional ingest auth:
-  - `INGEST_API_KEY`
-  - header: `x-netwatch-key`
-- `cell_id -> tower_id` auto-resolution when possible
+Synthetic dataset imports:
+- `npm run import:qos`
+- `npm run import:coverage`
+- `npm run import:events`
+- `npm run import:hardware`
+- `npm run import:uptime`
+- `npm run import:energy`
+- `npm run import:maintenance`
+- `npm run import:latency`
+- `npm run import:handovers`
+- `npm run import:dropped`
+- `npm run import:mobility`
+- `npm run import:penetration`
+- `npm run import:technicians`
 
-#### B) Existing analytics APIs retained
-- `/api/health`
-- `/api/towers`
-- `/api/towers/stats`
-- `/api/readings/latest`
-- `/api/readings/history`
-- `/api/readings/summary`
-- `/api/speedtests` (GET/POST)
+Combined remaining Tier 2 import:
+- `npm run import:remaining`
 
-#### C) Recommendation API
-- `GET /api/recommendation?lat=...&lon=...&radius_km=...&hours=...`
-- ranks provider using weighted score:
-  - signal, latency, dl speed, freshness, sample count
-- returns confidence + best provider
+`import:remaining` runs:
+1. dropped calls
+2. mobility traces
+3. network penetration
+4. technician logs
 
-#### D) Outage APIs (IODA groundwork)
+All import scripts:
+- read CSV files from `data/`
+- batch insert in chunks of 100
+- use parameterized SQL
+- use `ON CONFLICT DO NOTHING`
+- print progress and summary output
+
+---
+
+### 6) Expected CSV Filenames
+These filenames are expected in `data/`:
+
+- `quality_of_service_metrics.csv`
+- `coverage_maps_and_signal_strength_data.csv`
+- `network_event_logs.csv`
+- `hardware_sensor_data.csv`
+- `base_station_uptime_logs.csv`
+- `tower_energy_consumption_records.csv`
+- `maintenance_work_orders.csv`
+- `ultra_low_latency_logs.csv`
+- `cell_tower_handover_data.csv`
+- `dropped_call_records.csv`
+- `mobility_trace_datasets.csv`
+- `fourth_generation_fifth_generation_penetration_datasets.csv`
+- `technician_activity_logs.csv`
+
+Do not commit these CSVs to GitHub.
+
+---
+
+### 7) Backend APIs
+Core APIs retained:
+- `GET /api/health`
+- `GET /api/towers`
+- `GET /api/towers/stats`
+- `POST /api/readings`
+- `POST /api/readings/device`
+- `GET /api/readings/latest`
+- `GET /api/readings/history`
+- `GET /api/readings/summary`
+- `GET /api/speedtests`
+- `POST /api/speedtests`
+- `GET /api/speedtest/ping`
+- `GET /api/speedtest/download`
+- `POST /api/speedtest/upload`
+- `GET /api/recommendation`
 - `GET /api/outages`
 - `GET /api/outages/stats`
 - `GET /api/outages/correlate`
 - `POST /api/outages/sync`
-- `server/index.js` has 6-hour `setInterval` auto sync hook to run IODA script
 
-#### E) Real speed test APIs
-- `GET /api/speedtest/ping`
-- `GET /api/speedtest/download`
-- `POST /api/speedtest/upload`
-Used by frontend speed test for measured throughput/latency.
+Synthetic dataset APIs added:
+- `GET /api/qos`
+- `GET /api/coverage`
+- `GET /api/events`
+- `GET /api/hardware`
+- `GET /api/uptime`
+- `GET /api/energy`
+- `GET /api/maintenance`
+- `GET /api/latency`
+- `GET /api/handovers`
+- `GET /api/dropped-calls`
+- `GET /api/mobility`
+- `GET /api/penetration`
+- `GET /api/technicians`
+
+Recommendation endpoint behavior:
+- Uses live readings first
+- Falls back to synthetic `coverage_data` when no recent live readings exist nearby
+
+Outage correlation behavior:
+- `/api/outages/correlate` now includes pre-outage signals from:
+  - live readings
+  - network events
+  - hardware sensors
+  - uptime logs
+  - energy records
+  - maintenance orders
+  - latency logs
+  - handover records
+  - dropped calls
+  - technician logs
 
 ---
 
-### 6) Frontend Features Implemented
-
-#### Tabs
+### 8) Frontend State
+Current dashboard tabs:
 - Map
 - Analytics
 - Data Log
@@ -107,116 +205,156 @@ Used by frontend speed test for measured throughput/latency.
 - Outages
 - Speed Test
 
-#### Map upgrades
-- base layer toggle:
-  - standard
-  - earth/satellite-like
-  - roads
-- place search (Nigeria-focused, Nominatim)
+Implemented frontend features:
+- Map layer toggle
+- Nigeria-focused place search
 - destination-based provider recommendation panel
-- hover tooltip on tower markers:
-  - operator/cell/network/signal/latency/DL/UL
-- click tower details panel
-- coverage radial circle on click added (UX behavior still needs refinement based on user feedback)
+- tower hover tooltip
+- tower detail panel
+- coverage radial circle on click
+- real HTTP speed test
+- outage summary and correlation panel
 
-#### Speed test changes
-- switched from pure simulated profile values to real HTTP measurement flow
-- server/provider selector removed per user request
-- now “current connection” style (fast.com-like UX)
+Frontend still needs updates to fully visualize the newly imported synthetic datasets.
 
-#### Outages tab
-- summary cards
-- timeline chart
-- outage table
-- pre-outage correlation panel
-- sync-now button
+Recommended next frontend work:
+1. Add synthetic source labels wherever synthetic data appears
+2. Add dashboard cards for QoS, coverage, energy, maintenance, dropped calls, and technician activity
+3. Add a Predictions tab
+4. Add outage-risk markers on map
 
 ---
 
-### 7) Mobile Data Collection Status
+### 9) Mobile Data Collection Status
 User has MacroDroid + HTTP Shortcuts posting to deployed backend and ingestion is confirmed.
 
-Observed `/api/readings/latest` sample:
-- one device row with placeholder values:
+Observed issue:
+- uploads worked but sample values were placeholders:
   - `tower_id: null`
   - `cell_id: "123456789"`
   - `operator: "Unknown"`
   - `signal_dbm: -85`
-This confirms pipeline works but values are still placeholders, not yet true telephony variables.
 
 Meaning:
-- transport/auth/path are good
-- telemetry quality tuning still pending (real cell/operator/signal extraction on device side)
+- transport/auth/API path are good
+- phone-side telemetry extraction still needs tuning
+
+High-priority mobile work:
+1. replace placeholder `cell_id`
+2. replace placeholder `operator`
+3. capture dynamic real `signal_dbm`
+4. improve tower resolution rate
 
 ---
 
-### 8) Deployment Status
-- User moved away from Railway and deployed on Render.
-- User confirmed deployment “working fine”.
-- Main app reachable and operating.
-- Remaining operational work is data quality + model/prediction evolution.
+### 10) Deployment Status
+- App is deployed on Render
+- Supabase is the production database
+- GitHub repo is the deployment source
+- Render auto-redeploys after pushes to GitHub
+
+After backend changes:
+1. commit code
+2. push to GitHub
+3. wait for Render deploy
+4. test API endpoint
+
+Example:
+```powershell
+git add package.json server/db.js server/routes.js scripts/importDroppedCalls.js scripts/importMobilityTraces.js scripts/importNetworkPenetration.js scripts/importTechnicianLogs.js
+git commit -m "Add remaining Tier 2 dataset imports and APIs"
+git push origin main
+```
 
 ---
 
-### 9) Major Issues Encountered (and outcomes)
-1. Git not installed initially -> resolved.
-2. Git identity not configured -> resolved.
-3. Push/refspec/remote mismatch issues -> resolved progressively.
-4. Large push/network reset concerns noted (recommend `.gitignore` hygiene).
-5. Supabase DNS/connectivity issues from local environment appeared during alternative host exploration.
-6. IODA fetch currently failing from user environment (`fetch failed`, timeout) despite code integration.
-7. Coverage radial UX not yet satisfactory to user (known pending UI refinement).
-8. MacroDroid variable confusion:
-   - user ended up with working uploads but placeholder payload values.
+### 11) Known Issues and Notes
+1. IODA sync can fail due to CAIDA/IODA connectivity or egress timeout.
+2. Local Supabase connectivity can occasionally fail due to DNS/network issues.
+3. Windows can lock CSV files during import.
+   - Example seen during mobility import:
+     - `EBUSY: resource busy or locked, read`
+     - import had already inserted about 445,500 mobility rows before failing
+   - Likely causes:
+     - CSV open in Excel/Notepad/VS Code
+     - File Explorer preview pane
+     - OneDrive sync
+     - Windows Defender scan
+     - file still copying/downloading
+   - Safe fix:
+     - close anything using the file
+     - wait 10 seconds
+     - rerun the importer
+   - Re-running is safe because imports use `ON CONFLICT DO NOTHING`.
+4. `.env` must not be committed.
+5. CSV dataset files must not be committed.
+6. Coverage radial UX still needs refinement.
 
 ---
 
-### 10) Current Functional Truth
-- Core platform is operational on Render.
-- Real ingestion endpoint works in production.
-- Dashboard updates from backend.
-- Speed test now measures real network transfer against server endpoints.
-- Outage framework integrated in code + DB, but external IODA data sync depends on network reachability to CAIDA API.
-- Prediction modeling is not yet built; groundwork is present (outages + correlate endpoint).
+### 12) Current Import Status
+Known completed earlier:
+- QoS import worked
+- Coverage import worked
+
+Most recent event:
+- `npm run import:remaining` was started
+- dropped calls likely completed before mobility started
+- mobility import reached about 445,500 rows, then failed with Windows `EBUSY`
+
+Next verification commands in Supabase SQL Editor:
+```sql
+SELECT COUNT(*) FROM qos_metrics;
+SELECT COUNT(*) FROM coverage_data;
+SELECT COUNT(*) FROM network_events;
+SELECT COUNT(*) FROM hardware_sensors;
+SELECT COUNT(*) FROM uptime_logs;
+SELECT COUNT(*) FROM energy_consumption;
+SELECT COUNT(*) FROM maintenance_orders;
+SELECT COUNT(*) FROM latency_logs;
+SELECT COUNT(*) FROM handover_records;
+SELECT COUNT(*) FROM dropped_calls;
+SELECT COUNT(*) FROM mobility_traces;
+SELECT COUNT(*) FROM network_penetration;
+SELECT COUNT(*) FROM technician_logs;
+```
+
+If mobility is below expected row count, rerun:
+```powershell
+npm run import:mobility
+```
+
+Then continue:
+```powershell
+npm run import:penetration
+npm run import:technicians
+```
+
+Or rerun all four safely:
+```powershell
+npm run import:remaining
+```
 
 ---
 
-### 11) What’s Pending (highest priority)
-1. Replace placeholder mobile payload fields with real values:
-   - `cell_id`
-   - `operator`
-   - `signal_dbm`
-2. Refine tower coverage circle UX behavior as requested.
-3. Verify and stabilize IODA connectivity path (or run sync from environment with reachable egress).
-4. Build first outage-risk predictor pipeline from:
-   - confirmed outages
-   - pre-outage reading windows
+### 13) Suggested Next Action
+Best next step:
+1. Finish/retry the remaining imports after closing any app that may lock CSV files
+2. Confirm row counts in Supabase
+3. Push the latest code changes to GitHub
+4. Verify Render endpoints:
+   - `/api/dropped-calls?limit=5`
+   - `/api/mobility?limit=5`
+   - `/api/penetration?limit=5`
+   - `/api/technicians?limit=5`
+5. Start building the first outage-risk scoring endpoint and Predictions dashboard tab
 
----
-
-### 12) Important API/Auth Details for next model
-Device upload:
-- Endpoint: `POST /api/readings/device`
-- Header: `x-netwatch-key: <INGEST_API_KEY>`
-- `signal_dbm` must be numeric or request fails
-- inserted into `readings` table
-- unresolved towers remain `tower_id = null`
-
----
-
-### 13) Data Integrity Notes
-- Headerless `621.csv` is expected and correctly handled by import script (position-based parsing).
-- “Only 1000 rows” confusion likely UI pagination, not true table size; should always verify with SQL `count(*)`.
-
----
-
-### 14) Suggested Next Action for another AI
-If continuing this project, start by:
-1. validating live payload quality in `readings` (not just transport)
-2. implementing robust mobile-side fallback mapping rules
-3. adding diagnostics endpoint/dashboard card for “ingestion quality”:
-   - percent rows with non-null `tower_id`
-   - percent non-Unknown operator
-   - percent dynamic signal values
-4. then proceed to outage prediction baseline model.
-
+First prediction baseline should use:
+- low signal / high latency from readings and QoS
+- outage labels from uptime logs
+- event spikes from network events
+- hardware alerts and bad health
+- energy anomalies
+- recent maintenance and technician activity
+- handover failures
+- dropped-call spikes
