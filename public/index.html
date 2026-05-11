@@ -156,6 +156,37 @@
   ::-webkit-scrollbar{width:4px;height:4px}
   ::-webkit-scrollbar-track{background:transparent}
   ::-webkit-scrollbar-thumb{background:var(--bdr2);border-radius:2px}
+
+  /* ── MOBILE RESPONSIVENESS ── */
+  @media (max-width: 768px) {
+    .hdr { flex-wrap: wrap; }
+    .logo { flex: 1; }
+    #api-badge { flex: none; }
+    .kpis { flex: 0 0 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; order: 3; margin-top: 8px; }
+    .kpi { border-radius: 6px; padding: 4px 6px; }
+    .kpi-l { font-size: 9px; }
+    .kpi-v { font-size: 12px; }
+    .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .tab { flex-shrink: 0; padding: 9px 12px; }
+    
+    #p-map.panel.on { flex-direction: column; }
+    .map-wrap { flex: 0 0 45%; border-bottom: 0.5px solid var(--bdr); }
+    .sidebar { width: 100%; flex: 1; min-height: 0; border-left: none; }
+    
+    .cc.h, .ic.h { width: 100%; }
+    .mg { grid-template-columns: 1fr; }
+    
+    .dl-bar { flex-wrap: wrap; }
+    .dl-bar .nbtn { flex: 1; text-align: center; }
+    
+    .out-grid { grid-template-columns: 1fr 1fr; }
+    .out-main { grid-template-columns: 1fr; }
+    
+    .st-gauges { flex-direction: column; gap: 16px; align-items: center; }
+    .st-results { grid-template-columns: 1fr 1fr; }
+    .st-server { flex-direction: column; width: 100%; }
+    .srv-sel, .run-btn { width: 100%; min-width: 0; }
+  }
 </style>
 </head>
 <body>
