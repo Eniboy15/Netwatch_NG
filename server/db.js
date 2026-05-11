@@ -349,6 +349,110 @@ async function bootstrap() {
       CREATE INDEX IF NOT EXISTS idx_handover_records_source    ON handover_records(source_tower_id);
       CREATE INDEX IF NOT EXISTS idx_handover_records_target    ON handover_records(target_tower_id);
       CREATE INDEX IF NOT EXISTS idx_handover_records_cities    ON handover_records(source_city, target_city);
+
+      -- Synthetic dropped-call records from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS dropped_calls (
+        id                         SERIAL PRIMARY KEY,
+        drop_id                    VARCHAR(40) NOT NULL UNIQUE,
+        dropped_at                 TIMESTAMP NOT NULL,
+        operator                   VARCHAR(20),
+        calling_number             VARCHAR(30),
+        called_number              VARCHAR(30),
+        source_tower_id            VARCHAR(40),
+        city                       VARCHAR(60),
+        call_duration_before_drop  INT,
+        drop_reason                VARCHAR(60),
+        signal_strength_dbm        DOUBLE PRECISION,
+        network                    VARCHAR(10),
+        source                     VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic dropped-call records',
+        imported_at                TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_dropped_calls_time      ON dropped_calls(dropped_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_dropped_calls_operator  ON dropped_calls(operator);
+      CREATE INDEX IF NOT EXISTS idx_dropped_calls_city      ON dropped_calls(city);
+      CREATE INDEX IF NOT EXISTS idx_dropped_calls_reason    ON dropped_calls(drop_reason);
+      CREATE INDEX IF NOT EXISTS idx_dropped_calls_tower     ON dropped_calls(source_tower_id);
+
+      -- Synthetic mobility traces from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS mobility_traces (
+        id                  SERIAL PRIMARY KEY,
+        trace_id            VARCHAR(40) NOT NULL UNIQUE,
+        trace_time          TIMESTAMP NOT NULL,
+        customer_id         VARCHAR(40),
+        lat                 DOUBLE PRECISION,
+        lon                 DOUBLE PRECISION,
+        city                VARCHAR(60),
+        source_tower_id     VARCHAR(40),
+        movement_speed_kmh  DOUBLE PRECISION,
+        direction_degrees   INT,
+        user_density        VARCHAR(20),
+        time_of_day         VARCHAR(20),
+        day_of_week         VARCHAR(20),
+        location_type       VARCHAR(40),
+        source              VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic mobility traces',
+        imported_at         TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_mobility_traces_time   ON mobility_traces(trace_time DESC);
+      CREATE INDEX IF NOT EXISTS idx_mobility_traces_city   ON mobility_traces(city);
+      CREATE INDEX IF NOT EXISTS idx_mobility_traces_latlon ON mobility_traces(lat, lon);
+      CREATE INDEX IF NOT EXISTS idx_mobility_traces_tower  ON mobility_traces(source_tower_id);
+
+      -- Synthetic 4G/5G penetration data from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS network_penetration (
+        id                         SERIAL PRIMARY KEY,
+        city                       VARCHAR(60) NOT NULL,
+        state                      VARCHAR(60) NOT NULL,
+        operator                   VARCHAR(20) NOT NULL,
+        month                      DATE NOT NULL,
+        total_users                INT,
+        users_2g                   INT,
+        users_3g                   INT,
+        users_4g                   INT,
+        users_5g                   INT,
+        penetration_4g_percent     DOUBLE PRECISION,
+        penetration_5g_percent     DOUBLE PRECISION,
+        growth_rate_4g_percent     DOUBLE PRECISION,
+        growth_rate_5g_percent     DOUBLE PRECISION,
+        source                     VARCHAR(100) DEFAULT 'ElectricSheep Africa synthetic 4G/5G penetration data',
+        imported_at                TIMESTAMP DEFAULT NOW(),
+        UNIQUE(city, state, operator, month)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_network_penetration_month    ON network_penetration(month DESC);
+      CREATE INDEX IF NOT EXISTS idx_network_penetration_city     ON network_penetration(city);
+      CREATE INDEX IF NOT EXISTS idx_network_penetration_state    ON network_penetration(state);
+      CREATE INDEX IF NOT EXISTS idx_network_penetration_operator ON network_penetration(operator);
+
+      -- Synthetic technician activity logs from ElectricSheep Africa / Amon Din.
+      CREATE TABLE IF NOT EXISTS technician_logs (
+        id                   SERIAL PRIMARY KEY,
+        activity_id          VARCHAR(40) NOT NULL UNIQUE,
+        technician_id        VARCHAR(40),
+        source_tower_id      VARCHAR(40),
+        city                 VARCHAR(60),
+        operator             VARCHAR(20),
+        activity_type        VARCHAR(60),
+        priority             VARCHAR(20),
+        status               VARCHAR(30),
+        started_at           TIMESTAMP,
+        ended_at             TIMESTAMP,
+        duration_min         INT,
+        issue_resolved       BOOLEAN,
+        travel_km            DOUBLE PRECISION,
+        materials_used       VARCHAR(120),
+        notes                TEXT,
+        source               VARCHAR(90) DEFAULT 'ElectricSheep Africa synthetic technician activity logs',
+        imported_at          TIMESTAMP DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_technician_logs_started    ON technician_logs(started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_technician_logs_technician ON technician_logs(technician_id);
+      CREATE INDEX IF NOT EXISTS idx_technician_logs_tower      ON technician_logs(source_tower_id);
+      CREATE INDEX IF NOT EXISTS idx_technician_logs_city       ON technician_logs(city);
+      CREATE INDEX IF NOT EXISTS idx_technician_logs_operator   ON technician_logs(operator);
+      CREATE INDEX IF NOT EXISTS idx_technician_logs_status     ON technician_logs(status);
     `);
     console.log('✅  Database schema ready');
   } finally {

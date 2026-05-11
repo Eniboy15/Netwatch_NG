@@ -16,6 +16,11 @@
     "import:maintenance": "node scripts/importMaintenanceOrders.js",
     "import:latency": "node scripts/importLatencyLogs.js",
     "import:handovers": "node scripts/importHandovers.js",
+    "import:dropped": "node scripts/importDroppedCalls.js",
+    "import:mobility": "node scripts/importMobilityTraces.js",
+    "import:penetration": "node scripts/importNetworkPenetration.js",
+    "import:technicians": "node scripts/importTechnicianLogs.js",
+    "import:remaining": "npm run import:dropped && npm run import:mobility && npm run import:penetration && npm run import:technicians",
     "sync:ioda": "node scripts/syncIODA.js"
   },
   "dependencies": {

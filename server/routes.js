@@ -1028,6 +1028,170 @@ router.get('/handovers', async (req, res) => {
   }
 });
 
+router.get('/dropped-calls', async (req, res) => {
+  try {
+    const { operator, city, network, reason, tower_id, from, until, limit = 200 } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') { conds.push(`operator = $${p++}`); params.push(operator); }
+    if (city && city !== 'all') { conds.push(`city = $${p++}`); params.push(city); }
+    if (network && network !== 'all') { conds.push(`network = $${p++}`); params.push(normalizeNetwork(network)); }
+    if (reason && reason !== 'all') { conds.push(`drop_reason = $${p++}`); params.push(String(reason).slice(0, 60)); }
+    if (tower_id) { conds.push(`source_tower_id = $${p++}`); params.push(String(tower_id).slice(0, 40)); }
+    if (from) {
+      const d = new Date(from);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'from must be a valid date/time' });
+      conds.push(`dropped_at >= $${p++}`); params.push(d.toISOString());
+    }
+    if (until) {
+      const d = new Date(until);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'until must be a valid date/time' });
+      conds.push(`dropped_at <= $${p++}`); params.push(d.toISOString());
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+    const { rows } = await pool.query(
+      `SELECT drop_id, dropped_at, operator, calling_number, called_number,
+              source_tower_id, city, call_duration_before_drop, drop_reason,
+              signal_strength_dbm, network, source
+       FROM dropped_calls
+       ${where}
+       ORDER BY dropped_at DESC
+       LIMIT $${p}`,
+      params
+    );
+    res.json({ count: rows.length, source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.', dropped_calls: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/mobility', async (req, res) => {
+  try {
+    const { city, tower_id, density, location_type, bbox, limit = 200 } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (city && city !== 'all') { conds.push(`city = $${p++}`); params.push(city); }
+    if (tower_id) { conds.push(`source_tower_id = $${p++}`); params.push(String(tower_id).slice(0, 40)); }
+    if (density && density !== 'all') { conds.push(`user_density = $${p++}`); params.push(String(density).slice(0, 20)); }
+    if (location_type && location_type !== 'all') { conds.push(`location_type = $${p++}`); params.push(String(location_type).slice(0, 40)); }
+    if (bbox) {
+      const [minLat, minLon, maxLat, maxLon] = bbox.split(',').map(Number);
+      if (![minLat, minLon, maxLat, maxLon].every(Number.isFinite)) {
+        return res.status(400).json({ error: 'bbox must be minLat,minLon,maxLat,maxLon' });
+      }
+      conds.push(`lat BETWEEN $${p++} AND $${p++}`); params.push(minLat, maxLat);
+      conds.push(`lon BETWEEN $${p++} AND $${p++}`); params.push(minLon, maxLon);
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+    const { rows } = await pool.query(
+      `SELECT trace_id, trace_time, customer_id, lat, lon, city, source_tower_id,
+              movement_speed_kmh, direction_degrees, user_density, time_of_day,
+              day_of_week, location_type, source
+       FROM mobility_traces
+       ${where}
+       ORDER BY trace_time DESC
+       LIMIT $${p}`,
+      params
+    );
+    res.json({ count: rows.length, source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.', traces: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/penetration', async (req, res) => {
+  try {
+    const { operator, city, state, from, until, limit = 200 } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') { conds.push(`operator = $${p++}`); params.push(operator); }
+    if (city && city !== 'all') { conds.push(`city = $${p++}`); params.push(city); }
+    if (state && state !== 'all') { conds.push(`state = $${p++}`); params.push(state); }
+    if (from) {
+      const d = new Date(from);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'from must be a valid date/time' });
+      conds.push(`month >= $${p++}`); params.push(d.toISOString().slice(0, 10));
+    }
+    if (until) {
+      const d = new Date(until);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'until must be a valid date/time' });
+      conds.push(`month <= $${p++}`); params.push(d.toISOString().slice(0, 10));
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+    const { rows } = await pool.query(
+      `SELECT city, state, operator, month, total_users, users_2g, users_3g,
+              users_4g, users_5g, penetration_4g_percent, penetration_5g_percent,
+              growth_rate_4g_percent, growth_rate_5g_percent, source
+       FROM network_penetration
+       ${where}
+       ORDER BY month DESC, city, operator
+       LIMIT $${p}`,
+      params
+    );
+    res.json({ count: rows.length, source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.', penetration: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/technicians', async (req, res) => {
+  try {
+    const { operator, city, tower_id, technician_id, status, type, from, until, limit = 200 } = req.query;
+    const conds = [];
+    const params = [];
+    let p = 1;
+
+    if (operator && operator !== 'all') { conds.push(`operator = $${p++}`); params.push(operator); }
+    if (city && city !== 'all') { conds.push(`city = $${p++}`); params.push(city); }
+    if (tower_id) { conds.push(`source_tower_id = $${p++}`); params.push(String(tower_id).slice(0, 40)); }
+    if (technician_id) { conds.push(`technician_id = $${p++}`); params.push(String(technician_id).slice(0, 40)); }
+    if (status && status !== 'all') { conds.push(`status = $${p++}`); params.push(String(status).slice(0, 30)); }
+    if (type && type !== 'all') { conds.push(`activity_type = $${p++}`); params.push(String(type).slice(0, 60)); }
+    if (from) {
+      const d = new Date(from);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'from must be a valid date/time' });
+      conds.push(`started_at >= $${p++}`); params.push(d.toISOString());
+    }
+    if (until) {
+      const d = new Date(until);
+      if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'until must be a valid date/time' });
+      conds.push(`started_at <= $${p++}`); params.push(d.toISOString());
+    }
+
+    const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 200, 1), 1000);
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    params.push(safeLimit);
+    const { rows } = await pool.query(
+      `SELECT activity_id, technician_id, source_tower_id, city, operator,
+              activity_type, priority, status, started_at, ended_at,
+              duration_min, issue_resolved, travel_km, materials_used, notes, source
+       FROM technician_logs
+       ${where}
+       ORDER BY started_at DESC NULLS LAST
+       LIMIT $${p}`,
+      params
+    );
+    res.json({ count: rows.length, source_note: 'Synthetic training data from ElectricSheep Africa / Amon Din, not live measured data.', technician_logs: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── POST /api/speedtests ─────────────────────────────────────────
 router.post('/speedtests', async (req, res) => {
   try {
@@ -1453,6 +1617,45 @@ router.get('/outages/correlate', async (req, res) => {
          AND hr.handover_time >= o.started_at - INTERVAL '2 hours'
          AND hr.handover_time < o.started_at
         GROUP BY o.id
+      ),
+      dropped_call_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(dc.*)::int AS dropped_call_count,
+          ROUND(AVG(dc.signal_strength_dbm)::numeric, 1) AS avg_dropped_call_signal_dbm,
+          COALESCE(
+            jsonb_object_agg(dc.drop_reason, drop_counts.total)
+              FILTER (WHERE dc.drop_reason IS NOT NULL),
+            '{}'::jsonb
+          ) AS dropped_call_reason_counts
+        FROM limited_outages o
+        LEFT JOIN dropped_calls dc
+          ON dc.operator = o.operator
+         AND dc.dropped_at >= o.started_at - INTERVAL '2 hours'
+         AND dc.dropped_at < o.started_at
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*)::int AS total
+          FROM dropped_calls dc2
+          WHERE dc2.operator = o.operator
+            AND dc2.dropped_at >= o.started_at - INTERVAL '2 hours'
+            AND dc2.dropped_at < o.started_at
+            AND dc2.drop_reason = dc.drop_reason
+        ) drop_counts ON true
+        GROUP BY o.id
+      ),
+      technician_stats AS (
+        SELECT
+          o.id AS outage_id,
+          COUNT(tl.*)::int AS technician_activity_count,
+          COUNT(*) FILTER (WHERE tl.issue_resolved = false)::int AS unresolved_technician_activity_count,
+          ROUND(AVG(tl.duration_min)::numeric, 1) AS avg_technician_duration_min,
+          ROUND(SUM(tl.travel_km)::numeric, 1) AS total_technician_travel_km
+        FROM limited_outages o
+        LEFT JOIN technician_logs tl
+          ON tl.operator = o.operator
+         AND tl.started_at >= o.started_at - INTERVAL '7 days'
+         AND tl.started_at < o.started_at
+        GROUP BY o.id
       )
       SELECT
         o.id AS outage_id,
@@ -1499,7 +1702,14 @@ router.get('/outages/correlate', async (req, res) => {
         COALESCE(hds.handover_failure_count, 0) AS handover_failure_count,
         hds.avg_handover_duration_ms,
         hds.avg_handover_source_signal_dbm,
-        hds.avg_handover_target_signal_dbm
+        hds.avg_handover_target_signal_dbm,
+        COALESCE(dcs.dropped_call_count, 0) AS dropped_call_count,
+        dcs.avg_dropped_call_signal_dbm,
+        COALESCE(dcs.dropped_call_reason_counts, '{}'::jsonb) AS dropped_call_reason_counts,
+        COALESCE(ts.technician_activity_count, 0) AS technician_activity_count,
+        COALESCE(ts.unresolved_technician_activity_count, 0) AS unresolved_technician_activity_count,
+        ts.avg_technician_duration_min,
+        ts.total_technician_travel_km
       FROM limited_outages o
       LEFT JOIN reading_stats rs ON rs.outage_id = o.id
       LEFT JOIN event_stats es ON es.outage_id = o.id
@@ -1509,6 +1719,8 @@ router.get('/outages/correlate', async (req, res) => {
       LEFT JOIN maintenance_stats ms ON ms.outage_id = o.id
       LEFT JOIN latency_stats ls ON ls.outage_id = o.id
       LEFT JOIN handover_stats hds ON hds.outage_id = o.id
+      LEFT JOIN dropped_call_stats dcs ON dcs.outage_id = o.id
+      LEFT JOIN technician_stats ts ON ts.outage_id = o.id
       ORDER BY o.started_at DESC
       `,
       [limit]
