@@ -126,6 +126,23 @@
   .sev{font-weight:600}
   .sev.g{color:#1D9E75}.sev.a{color:#BA7517}.sev.r{color:#A32D2D}
   .sig-b{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600}
+  #p-predictions{flex-direction:column;overflow:hidden}
+  .pred-wrap{display:flex;flex-direction:column;height:100%}
+  .pred-grid{padding:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;border-bottom:0.5px solid var(--bdr);background:var(--bg)}
+  .pred-main{display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1;padding:12px;min-height:0}
+  .pred-panel{background:var(--bg);border:0.5px solid var(--bdr);border-radius:12px;padding:10px;min-height:0;display:flex;flex-direction:column}
+  .risk-row{display:grid;grid-template-columns:76px 1fr 70px;gap:10px;align-items:center;padding:9px 0;border-bottom:0.5px solid var(--bdr);font-size:12px}
+  .risk-row:last-child{border-bottom:none}
+  .risk-op{font-weight:600}
+  .risk-meter{height:6px;background:var(--bg3);border-radius:4px;overflow:hidden}
+  .risk-fill{height:100%;border-radius:4px}
+  .risk-score{text-align:right;font-family:monospace;font-weight:600}
+  .risk-chip{display:inline-flex;align-items:center;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600}
+  .factor{padding:8px 0;border-bottom:0.5px solid var(--bdr);font-size:12px;line-height:1.35}
+  .factor:last-child{border-bottom:none}
+  .factor-top{display:flex;justify-content:space-between;gap:10px}
+  .factor-src{margin-top:3px;color:var(--txt3);font-size:11px}
+  .source-note{font-size:11px;color:var(--txt2);line-height:1.4;margin-top:8px}
 
   /* ── SPEED TEST ── */
   #p-speedtest{flex-direction:column;overflow-y:auto;background:var(--bg2)}
@@ -179,8 +196,8 @@
     .dl-bar { flex-wrap: wrap; }
     .dl-bar .nbtn { flex: 1; text-align: center; }
     
-    .out-grid { grid-template-columns: 1fr 1fr; }
-    .out-main { grid-template-columns: 1fr; }
+    .out-grid, .pred-grid { grid-template-columns: 1fr 1fr; }
+    .out-main, .pred-main { grid-template-columns: 1fr; }
     
     .st-gauges { flex-direction: column; gap: 16px; align-items: center; }
     .st-results { grid-template-columns: 1fr 1fr; }
@@ -209,6 +226,7 @@
   <button class="tab"     onclick="sw('analytics',this)">Analytics</button>
   <button class="tab"     onclick="sw('datalog',this)">Data log</button>
   <button class="tab"     onclick="sw('patterns',this)">Patterns</button>
+  <button class="tab"     onclick="sw('predictions',this)">Predictions</button>
   <button class="tab"     onclick="sw('outages',this)">Outages</button>
   <button class="tab"     onclick="sw('speedtest',this)">Speed test</button>
 </div>
@@ -303,6 +321,36 @@
     <div class="ic h"><div class="sb-ttl">Provider performance ranking</div><div id="pr-rank"></div></div>
     <div class="ic h"><div class="sb-ttl">City coverage ranking</div><div id="city-rank"></div></div>
     <div class="ic f"><div class="sb-ttl">Detected patterns & anomalies</div><div id="anoms"></div></div>
+  </div>
+
+  <!-- PREDICTIONS -->
+  <div id="p-predictions" class="panel">
+    <div class="pred-wrap">
+      <div class="out-bar">
+        <span style="font-size:12px;color:var(--txt2)">Outage-risk baseline</span>
+        <div style="flex:1"></div>
+        <button class="nbtn" onclick="loadOutageRisk().catch(()=>{})">Refresh</button>
+      </div>
+      <div class="pred-grid">
+        <div class="out-card"><div class="out-l">Highest risk</div><div class="out-v" id="pred-top">-</div></div>
+        <div class="out-card"><div class="out-l">Average risk score</div><div class="out-v" id="pred-avg">0</div></div>
+        <div class="out-card"><div class="out-l">High-risk providers</div><div class="out-v" id="pred-high">0</div></div>
+        <div class="out-card"><div class="out-l">Model confidence</div><div class="out-v" id="pred-conf">-</div></div>
+      </div>
+      <div class="pred-main">
+        <div class="pred-panel">
+          <div class="out-title">Provider risk score</div>
+          <canvas id="c-risk" height="150"></canvas>
+          <div class="out-title" style="margin-top:10px">Risk ranking</div>
+          <div class="out-scroll" id="risk-list"></div>
+        </div>
+        <div class="pred-panel">
+          <div class="out-title">Top contributing signals</div>
+          <div class="out-scroll" id="risk-factors"></div>
+          <div class="source-note" id="risk-source-note"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- OUTAGES -->
@@ -908,6 +956,8 @@ function applyF(){
 let charts={};
 let OUTAGES = [];
 let OUTAGE_CORR = [];
+let OUTAGE_RISK = [];
+let OUTAGE_RISK_META = {};
 function initCharts(){
   const dark=isDark(), tc=dark?'#9c9a92':'#73726c', gc=dark?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)';
   const font={family:'monospace',size:11};
@@ -931,6 +981,11 @@ function initCharts(){
       {label:'Latency (ms)',data:[],borderColor:'#BA7517',backgroundColor:'transparent',borderWidth:2,tension:.3}
     ]},
     options:{...base}
+  });
+  charts.risk = new Chart(document.getElementById('c-risk'),{
+    type:'bar',
+    data:{labels:PROVIDERS,datasets:[{label:'Risk score',data:[0,0,0,0],backgroundColor:PROVIDERS.map((_,i)=>PC_COLORS[i]+'44'),borderColor:PC_COLORS,borderWidth:1.5}]},
+    options:{...base,plugins:{legend:{display:false}},scales:{x:{ticks:{color:tc,font},grid:{color:gc}},y:{min:0,max:100,ticks:{color:tc,font},grid:{color:gc}}}}
   });
 }
 
@@ -1019,6 +1074,65 @@ function ago(ts){
   if(s < 3600) return `${Math.floor(s/60)}m ago`;
   if(s < 86400) return `${Math.floor(s/3600)}h ago`;
   return `${Math.floor(s/86400)}d ago`;
+}
+
+function riskColor(score){
+  const v = Number(score || 0);
+  if(v >= 70) return '#A32D2D';
+  if(v >= 45) return '#BA7517';
+  if(v >= 25) return '#185FA5';
+  return '#1D9E75';
+}
+
+function riskChip(r){
+  const c = riskColor(r.score);
+  const bg = c === '#A32D2D' ? '#fcebeb' : c === '#BA7517' ? '#faeeda' : c === '#185FA5' ? '#e6f1fb' : '#e1f5ee';
+  return `<span class="risk-chip" style="background:${bg};color:${c}">${r.band}</span>`;
+}
+
+async function loadOutageRisk(){
+  const res = await fetch(`${API}/outages/risk?hours=6`);
+  if(!res.ok) throw new Error('Risk data unavailable');
+  const data = await res.json();
+  OUTAGE_RISK = data.risks || [];
+  OUTAGE_RISK_META = data || {};
+  renderOutageRisk();
+}
+
+function renderOutageRisk(){
+  const risks = OUTAGE_RISK;
+  const top = risks[0];
+  const avg = risks.length ? risks.reduce((s,r)=>s+Number(r.score||0),0)/risks.length : 0;
+  const high = risks.filter(r=>Number(r.score||0) >= 45).length;
+  const conf = top ? top.confidence : '-';
+  document.getElementById('pred-top').textContent = top ? `${top.operator} ${Math.round(top.score)}` : '-';
+  document.getElementById('pred-avg').textContent = Math.round(avg);
+  document.getElementById('pred-high').textContent = high;
+  document.getElementById('pred-conf').textContent = conf;
+
+  charts.risk.data.labels = risks.map(r=>r.operator);
+  charts.risk.data.datasets[0].data = risks.map(r=>Number(r.score || 0));
+  charts.risk.data.datasets[0].backgroundColor = risks.map(r=>riskColor(r.score)+'44');
+  charts.risk.data.datasets[0].borderColor = risks.map(r=>riskColor(r.score));
+  charts.risk.update();
+
+  const list = document.getElementById('risk-list');
+  list.innerHTML = risks.length ? risks.map(r=>`
+    <div class="risk-row">
+      <div class="risk-op">${r.operator}<div style="margin-top:3px">${riskChip(r)}</div></div>
+      <div class="risk-meter"><div class="risk-fill" style="width:${Math.min(100, Number(r.score || 0))}%;background:${riskColor(r.score)}"></div></div>
+      <div class="risk-score">${Math.round(Number(r.score || 0))}/100</div>
+    </div>
+  `).join('') : '<div style="font-size:12px;color:var(--txt2)">No risk data yet.</div>';
+
+  const factors = document.getElementById('risk-factors');
+  factors.innerHTML = top && top.contributors?.length ? top.contributors.map(f=>`
+    <div class="factor">
+      <div class="factor-top"><strong>${f.label}</strong><span style="font-family:monospace;color:${riskColor(f.points*6)}">+${f.points}</span></div>
+      <div class="factor-src">${f.evidence || 'baseline evidence'} · ${f.source === 'synthetic_training' ? 'synthetic training data' : 'live data'}</div>
+    </div>
+  `).join('') : '<div style="font-size:12px;color:var(--txt2)">No dominant risk factors yet.</div>';
+  document.getElementById('risk-source-note').textContent = OUTAGE_RISK_META.source_note || '';
 }
 
 async function loadOutages(){
@@ -1280,6 +1394,7 @@ function sw(name, el){
   document.getElementById(`p-${name}`).classList.add('on');
   if(name==='analytics') updCharts();
   if(name==='patterns')  updPatterns();
+  if(name==='predictions') loadOutageRisk().catch(()=>{});
   if(name==='outages')   loadOutages().catch(()=>{});
   if(name==='map')       setTimeout(()=>map.invalidateSize(),50);
   if(name==='speedtest'){drawGauge('g-dl',curDL||0,200,'#1D9E75');drawGauge('g-ul',curUL||0,100,'#185FA5');drawPingGauge('g-ping',curPing||0);}
@@ -1301,6 +1416,7 @@ window.addEventListener('load', async ()=>{
   searchPlaceMarkers = L.layerGroup().addTo(map);
   initCharts();
   loadOutages().catch(()=>{});
+  loadOutageRisk().catch(()=>{});
 
   if (SIMULATION_ON || !apiOnline){
     // warm up with initial simulated readings
@@ -1319,6 +1435,7 @@ window.addEventListener('load', async ()=>{
   setInterval(()=>{
     if(document.getElementById('p-analytics').classList.contains('on')) updCharts();
     if(document.getElementById('p-patterns').classList.contains('on'))  updPatterns();
+    if(document.getElementById('p-predictions').classList.contains('on')) loadOutageRisk().catch(()=>{});
     if(document.getElementById('p-outages').classList.contains('on'))   loadOutages().catch(()=>{});
   }, 5000);
 });

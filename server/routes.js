@@ -37,6 +37,179 @@ function normalizeNetwork(value) {
   return '4G';
 }
 
+function scoreRange(value, low, high, maxPoints, invert = false) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  const raw = invert ? (high - n) / (high - low) : (n - low) / (high - low);
+  return clamp(raw, 0, 1) * maxPoints;
+}
+
+function scoreBelow(value, ok, bad, maxPoints) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return clamp((ok - n) / (ok - bad), 0, 1) * maxPoints;
+}
+
+function riskBand(score) {
+  if (score >= 70) return 'critical';
+  if (score >= 45) return 'high';
+  if (score >= 25) return 'medium';
+  return 'low';
+}
+
+function addRisk(contributors, label, points, evidence, source = 'live_or_imported') {
+  const value = Number(points);
+  if (!Number.isFinite(value) || value <= 0) return;
+  contributors.push({
+    label,
+    points: Math.round(value * 10) / 10,
+    evidence,
+    source,
+  });
+}
+
+function buildOutageRisk(row) {
+  const contributors = [];
+
+  addRisk(
+    contributors,
+    'Weak recent signal',
+    scoreBelow(row.live_avg_signal, -85, -110, 18),
+    row.live_avg_signal === null ? null : `${row.live_avg_signal} dBm`,
+    'live_readings'
+  );
+  addRisk(
+    contributors,
+    'High live latency',
+    scoreRange(row.live_avg_latency, 80, 260, 12),
+    row.live_avg_latency === null ? null : `${row.live_avg_latency} ms`,
+    'live_readings'
+  );
+  addRisk(
+    contributors,
+    'Low live download speed',
+    scoreBelow(row.live_avg_dl, 12, 3, 8),
+    row.live_avg_dl === null ? null : `${row.live_avg_dl} Mbps`,
+    'live_readings'
+  );
+  addRisk(
+    contributors,
+    'Synthetic QoS degradation',
+    scoreBelow(row.qos_avg_signal, -88, -112, 10)
+      + scoreRange(row.qos_avg_latency, 90, 260, 6)
+      + scoreRange(row.qos_avg_packet_loss, 1, 8, 6)
+      + scoreRange(row.qos_avg_error_rate, 0.5, 5, 4),
+    `${row.qos_sample_count || 0} QoS samples`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Network event spike',
+    scoreRange(row.event_count, 50, 1500, 12) + scoreRange(row.event_avg_packet_loss, 1, 10, 5),
+    `${row.event_count || 0} events`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Uptime outage labels',
+    scoreRange(row.uptime_downtime_minutes, 10, 240, 10)
+      + scoreRange(row.uptime_outage_count, 1000, 20000, 8)
+      + scoreBelow(row.uptime_avg_percentage, 99.2, 95, 8),
+    `${row.uptime_outage_count || 0} synthetic outages`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Infrastructure hardware alerts',
+    scoreRange(row.hardware_alert_count, 20, 500, 7) + scoreRange(row.hardware_bad_health_count, 20, 500, 7),
+    `${row.hardware_alert_count || 0} alerts`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Energy pressure',
+    scoreBelow(row.energy_avg_grid_hours, 18, 6, 5) + scoreRange(row.energy_avg_generator_hours, 3, 16, 5),
+    row.energy_avg_grid_hours === null ? null : `${row.energy_avg_grid_hours}h grid avg`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Maintenance backlog',
+    scoreRange(row.maintenance_high_priority_count, 1, 12, 8) + scoreRange(row.maintenance_downtime_minutes, 30, 360, 7),
+    `${row.maintenance_high_priority_count || 0} high-priority orders`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Latency SLA misses',
+    scoreRange(row.latency_sla_miss_count, 2, 30, 8) + scoreRange(row.latency_avg_packet_loss, 1, 8, 5),
+    `${row.latency_sla_miss_count || 0} SLA misses`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Handover failures',
+    scoreRange(row.handover_failure_count, 2, 35, 8),
+    `${row.handover_failure_count || 0} failures`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Dropped-call spike',
+    scoreRange(row.dropped_call_count, 20, 500, 10)
+      + scoreBelow(row.dropped_avg_signal, -88, -112, 5),
+    `${row.dropped_call_count || 0} dropped calls`,
+    'synthetic_training'
+  );
+  addRisk(
+    contributors,
+    'Unresolved technician activity',
+    scoreRange(row.technician_unresolved_count, 1, 15, 8),
+    `${row.technician_unresolved_count || 0} unresolved jobs`,
+    'synthetic_training'
+  );
+
+  const rawScore = contributors.reduce((sum, item) => sum + item.points, 0);
+  const score = Math.round(Math.min(100, rawScore) * 10) / 10;
+  const evidenceCount =
+    Number(row.live_sample_count || 0)
+    + Number(row.qos_sample_count || 0)
+    + Number(row.event_count || 0)
+    + Number(row.uptime_log_count || 0)
+    + Number(row.maintenance_order_count || 0)
+    + Number(row.latency_log_count || 0)
+    + Number(row.handover_count || 0)
+    + Number(row.dropped_call_count || 0)
+    + Number(row.technician_activity_count || 0);
+  const confidence = evidenceCount >= 300 ? 'high' : evidenceCount >= 60 ? 'medium' : 'low';
+
+  return {
+    operator: row.operator,
+    score,
+    band: riskBand(score),
+    confidence,
+    evidence_count: evidenceCount,
+    live: {
+      sample_count: Number(row.live_sample_count || 0),
+      avg_signal: row.live_avg_signal === null ? null : Number(row.live_avg_signal),
+      avg_latency: row.live_avg_latency === null ? null : Number(row.live_avg_latency),
+      avg_dl: row.live_avg_dl === null ? null : Number(row.live_avg_dl),
+    },
+    synthetic: {
+      qos_samples: Number(row.qos_sample_count || 0),
+      network_events: Number(row.event_count || 0),
+      uptime_outages: Number(row.uptime_outage_count || 0),
+      hardware_alerts: Number(row.hardware_alert_count || 0),
+      maintenance_orders: Number(row.maintenance_order_count || 0),
+      latency_sla_misses: Number(row.latency_sla_miss_count || 0),
+      handover_failures: Number(row.handover_failure_count || 0),
+      dropped_calls: Number(row.dropped_call_count || 0),
+      unresolved_technician_jobs: Number(row.technician_unresolved_count || 0),
+    },
+    contributors: contributors.sort((a, b) => b.points - a.points).slice(0, 6),
+  };
+}
+
 function normalizeReading(raw) {
   const source = raw || {};
   const signal = clamp(toNumber(source.signal_dbm), -140, -20);
@@ -1726,6 +1899,223 @@ router.get('/outages/correlate', async (req, res) => {
       [limit]
     );
     res.json({ count: rows.length, correlations: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/outages/risk
+// Baseline outage-risk score from live readings plus synthetic training signals.
+router.get('/outages/risk', async (req, res) => {
+  try {
+    const requestedHours = parseInt(req.query.hours || '6', 10) || 6;
+    const hours = Math.min(Math.max(requestedHours, 1), 72);
+    const operators = ['MTN', 'Airtel', 'Glo', '9mobile'];
+
+    const { rows } = await pool.query(
+      `
+      WITH operators AS (
+        SELECT unnest($1::text[]) AS operator
+      ),
+      latest_qos AS (SELECT MAX(measured_at) AS ts FROM qos_metrics),
+      latest_events AS (SELECT MAX(event_time) AS ts FROM network_events),
+      latest_uptime AS (SELECT MAX(log_date) AS dt FROM uptime_logs),
+      latest_hardware AS (SELECT MAX(sensor_time) AS ts FROM hardware_sensors),
+      latest_energy AS (SELECT MAX(usage_date) AS dt FROM energy_consumption),
+      latest_maintenance AS (SELECT MAX(scheduled_date) AS dt FROM maintenance_orders),
+      latest_latency AS (SELECT MAX(measured_at) AS ts FROM latency_logs),
+      latest_handover AS (SELECT MAX(handover_time) AS ts FROM handover_records),
+      latest_dropped AS (SELECT MAX(dropped_at) AS ts FROM dropped_calls),
+      latest_technician AS (SELECT MAX(started_at) AS ts FROM technician_logs),
+      live_stats AS (
+        SELECT
+          operator,
+          COUNT(*)::int AS live_sample_count,
+          ROUND(AVG(signal_dbm)::numeric, 1) AS live_avg_signal,
+          ROUND(AVG(latency_ms)::numeric, 1) AS live_avg_latency,
+          ROUND(AVG(dl_mbps)::numeric, 1) AS live_avg_dl
+        FROM readings
+        WHERE recorded_at >= NOW() - ($2::int * INTERVAL '1 hour')
+          AND operator = ANY($1::text[])
+        GROUP BY operator
+      ),
+      qos_stats AS (
+        SELECT
+          qm.operator,
+          COUNT(*)::int AS qos_sample_count,
+          ROUND(AVG(qm.signal_strength_dbm)::numeric, 1) AS qos_avg_signal,
+          ROUND(AVG(qm.latency_ms)::numeric, 1) AS qos_avg_latency,
+          ROUND(AVG(qm.packet_loss_rate)::numeric, 2) AS qos_avg_packet_loss,
+          ROUND(AVG(qm.error_rate)::numeric, 2) AS qos_avg_error_rate
+        FROM qos_metrics qm, latest_qos lq
+        WHERE lq.ts IS NOT NULL
+          AND qm.measured_at >= lq.ts - ($2::int * INTERVAL '1 hour')
+          AND qm.operator = ANY($1::text[])
+        GROUP BY qm.operator
+      ),
+      event_stats AS (
+        SELECT
+          ne.operator,
+          COUNT(*)::int AS event_count,
+          ROUND(AVG(ne.packet_loss_percent)::numeric, 2) AS event_avg_packet_loss
+        FROM network_events ne, latest_events le
+        WHERE le.ts IS NOT NULL
+          AND ne.event_time >= le.ts - ($2::int * INTERVAL '1 hour')
+          AND ne.operator = ANY($1::text[])
+        GROUP BY ne.operator
+      ),
+      uptime_stats AS (
+        SELECT
+          ul.operator,
+          COUNT(*)::int AS uptime_log_count,
+          ROUND(AVG(ul.uptime_percentage)::numeric, 2) AS uptime_avg_percentage,
+          ROUND(SUM(ul.downtime_minutes)::numeric, 1) AS uptime_downtime_minutes,
+          COALESCE(SUM(ul.outage_count), 0)::int AS uptime_outage_count
+        FROM uptime_logs ul, latest_uptime lu
+        WHERE lu.dt IS NOT NULL
+          AND ul.log_date >= lu.dt - INTERVAL '7 days'
+          AND ul.operator = ANY($1::text[])
+        GROUP BY ul.operator
+      ),
+      hardware_stats AS (
+        SELECT
+          COUNT(*) FILTER (WHERE hs.alert_triggered = true)::int AS hardware_alert_count,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(hs.health_status, '')) IN ('warning', 'critical', 'fault', 'faulty', 'degraded')
+          )::int AS hardware_bad_health_count
+        FROM hardware_sensors hs, latest_hardware lh
+        WHERE lh.ts IS NOT NULL
+          AND hs.sensor_time >= lh.ts - ($2::int * INTERVAL '1 hour')
+      ),
+      energy_stats AS (
+        SELECT
+          ROUND(AVG(ec.grid_availability_hours)::numeric, 1) AS energy_avg_grid_hours,
+          ROUND(AVG(ec.generator_runtime_hours)::numeric, 1) AS energy_avg_generator_hours
+        FROM energy_consumption ec, latest_energy le
+        WHERE le.dt IS NOT NULL
+          AND ec.usage_date >= le.dt - INTERVAL '2 days'
+      ),
+      maintenance_stats AS (
+        SELECT
+          mo.operator,
+          COUNT(*)::int AS maintenance_order_count,
+          COUNT(*) FILTER (
+            WHERE LOWER(COALESCE(mo.priority, '')) IN ('high', 'critical', 'urgent')
+          )::int AS maintenance_high_priority_count,
+          ROUND(SUM(mo.downtime_minutes)::numeric, 1) AS maintenance_downtime_minutes
+        FROM maintenance_orders mo, latest_maintenance lm
+        WHERE lm.dt IS NOT NULL
+          AND mo.scheduled_date >= lm.dt - INTERVAL '14 days'
+          AND mo.operator = ANY($1::text[])
+        GROUP BY mo.operator
+      ),
+      latency_stats AS (
+        SELECT
+          ll.operator,
+          COUNT(*)::int AS latency_log_count,
+          ROUND(AVG(ll.packet_loss_percent)::numeric, 2) AS latency_avg_packet_loss,
+          COUNT(*) FILTER (WHERE ll.sla_met = false)::int AS latency_sla_miss_count
+        FROM latency_logs ll, latest_latency la
+        WHERE la.ts IS NOT NULL
+          AND ll.measured_at >= la.ts - ($2::int * INTERVAL '1 hour')
+          AND ll.operator = ANY($1::text[])
+        GROUP BY ll.operator
+      ),
+      handover_stats AS (
+        SELECT
+          hr.operator,
+          COUNT(*)::int AS handover_count,
+          COUNT(*) FILTER (WHERE hr.success = false)::int AS handover_failure_count
+        FROM handover_records hr, latest_handover lh
+        WHERE lh.ts IS NOT NULL
+          AND hr.handover_time >= lh.ts - ($2::int * INTERVAL '1 hour')
+          AND hr.operator = ANY($1::text[])
+        GROUP BY hr.operator
+      ),
+      dropped_stats AS (
+        SELECT
+          dc.operator,
+          COUNT(*)::int AS dropped_call_count,
+          ROUND(AVG(dc.signal_strength_dbm)::numeric, 1) AS dropped_avg_signal
+        FROM dropped_calls dc, latest_dropped ld
+        WHERE ld.ts IS NOT NULL
+          AND dc.dropped_at >= ld.ts - ($2::int * INTERVAL '1 hour')
+          AND dc.operator = ANY($1::text[])
+        GROUP BY dc.operator
+      ),
+      technician_stats AS (
+        SELECT
+          tl.operator,
+          COUNT(*)::int AS technician_activity_count,
+          COUNT(*) FILTER (WHERE tl.issue_resolved = false)::int AS technician_unresolved_count
+        FROM technician_logs tl, latest_technician lt
+        WHERE lt.ts IS NOT NULL
+          AND tl.started_at >= lt.ts - INTERVAL '7 days'
+          AND tl.operator = ANY($1::text[])
+        GROUP BY tl.operator
+      )
+      SELECT
+        o.operator,
+        COALESCE(ls.live_sample_count, 0) AS live_sample_count,
+        ls.live_avg_signal,
+        ls.live_avg_latency,
+        ls.live_avg_dl,
+        COALESCE(qs.qos_sample_count, 0) AS qos_sample_count,
+        qs.qos_avg_signal,
+        qs.qos_avg_latency,
+        qs.qos_avg_packet_loss,
+        qs.qos_avg_error_rate,
+        COALESCE(es.event_count, 0) AS event_count,
+        es.event_avg_packet_loss,
+        COALESCE(us.uptime_log_count, 0) AS uptime_log_count,
+        us.uptime_avg_percentage,
+        us.uptime_downtime_minutes,
+        COALESCE(us.uptime_outage_count, 0) AS uptime_outage_count,
+        COALESCE(hws.hardware_alert_count, 0) AS hardware_alert_count,
+        COALESCE(hws.hardware_bad_health_count, 0) AS hardware_bad_health_count,
+        ens.energy_avg_grid_hours,
+        ens.energy_avg_generator_hours,
+        COALESCE(ms.maintenance_order_count, 0) AS maintenance_order_count,
+        COALESCE(ms.maintenance_high_priority_count, 0) AS maintenance_high_priority_count,
+        ms.maintenance_downtime_minutes,
+        COALESCE(lts.latency_log_count, 0) AS latency_log_count,
+        lts.latency_avg_packet_loss,
+        COALESCE(lts.latency_sla_miss_count, 0) AS latency_sla_miss_count,
+        COALESCE(hds.handover_count, 0) AS handover_count,
+        COALESCE(hds.handover_failure_count, 0) AS handover_failure_count,
+        COALESCE(ds.dropped_call_count, 0) AS dropped_call_count,
+        ds.dropped_avg_signal,
+        COALESCE(ts.technician_activity_count, 0) AS technician_activity_count,
+        COALESCE(ts.technician_unresolved_count, 0) AS technician_unresolved_count
+      FROM operators o
+      LEFT JOIN live_stats ls ON ls.operator = o.operator
+      LEFT JOIN qos_stats qs ON qs.operator = o.operator
+      LEFT JOIN event_stats es ON es.operator = o.operator
+      LEFT JOIN uptime_stats us ON us.operator = o.operator
+      CROSS JOIN hardware_stats hws
+      CROSS JOIN energy_stats ens
+      LEFT JOIN maintenance_stats ms ON ms.operator = o.operator
+      LEFT JOIN latency_stats lts ON lts.operator = o.operator
+      LEFT JOIN handover_stats hds ON hds.operator = o.operator
+      LEFT JOIN dropped_stats ds ON ds.operator = o.operator
+      LEFT JOIN technician_stats ts ON ts.operator = o.operator
+      ORDER BY o.operator
+      `,
+      [operators, hours]
+    );
+
+    const risks = rows.map(buildOutageRisk).sort((a, b) => b.score - a.score);
+    const highest = risks[0] || null;
+
+    res.json({
+      ok: true,
+      generated_at: new Date().toISOString(),
+      model: 'baseline_weighted_v1',
+      window_hours: hours,
+      source_note: 'Risk scores combine live readings with ElectricSheep Africa / Amon Din synthetic training datasets. Synthetic signals are baseline indicators, not confirmed live outages.',
+      highest_risk: highest,
+      risks,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

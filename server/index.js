@@ -48,6 +48,7 @@ async function start() {
       console.log(`  GET  /api/outages`);
       console.log(`  GET  /api/outages/stats`);
       console.log(`  GET  /api/outages/correlate`);
+      console.log(`  GET  /api/outages/risk`);
       console.log(`  POST /api/outages/sync`);
       console.log('');
     });
