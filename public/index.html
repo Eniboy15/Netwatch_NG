@@ -210,9 +210,36 @@
     .st-server { flex-direction: column; width: 100%; }
     .srv-sel, .run-btn { width: 100%; min-width: 0; }
   }
+.loader {
+  border: 3px solid var(--bdr2);
+  border-top: 3px solid var(--green);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  animation: spin 0.8s linear infinite;
+  margin-right: 8px;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(0,0,0,0.7);
+  z-index: 2000;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.toast.success { background: #1D9E75; }
+.toast.error { background: #A32D2D; }
 </style>
 </head>
 <body>
+<div id="toast" class="toast" style="display:none;"></div>
 
 <div class="hdr">
   <div class="logo"><div class="live-dot"></div>NetWatch NG</div>
@@ -337,7 +364,7 @@
       <div class="out-bar">
         <span style="font-size:12px;color:var(--txt2)">Outage-risk baseline</span>
         <div style="flex:1"></div>
-        <button class="nbtn" onclick="refreshPredictions().catch(()=>{})">Refresh</button>
+        <button class="nbtn" id="pred-refresh-btn" onclick="refreshPredictions().catch(()=>{})">Refresh</button><div id="pred-spinner" class="loader" style="display:none; margin-left:8px;"></div>
       </div>
       <div class="pred-grid">
         <div class="out-card"><div class="out-l">Highest risk</div><div class="out-v" id="pred-top">-</div></div>
@@ -375,7 +402,7 @@
       <div class="out-bar">
         <span style="font-size:12px;color:var(--txt2)">IODA outage monitoring (Nigeria + operators)</span>
         <div style="flex:1"></div>
-        <button class="nbtn" id="out-sync-btn" onclick="syncOutagesNow()">Sync now</button>
+        <button class="nbtn" id="out-sync-btn" onclick="syncOutagesNow()">Sync now</button><div id="out-spinner" class="loader" style="display:none; margin-left:8px;"></div>
       </div>
       <div class="out-grid">
         <div class="out-card"><div class="out-l">Total outages recorded</div><div class="out-v" id="out-total">0</div></div>
@@ -1177,10 +1204,20 @@ async function loadSyntheticSummary(){
 }
 
 async function refreshPredictions(){
-  await Promise.all([
-    loadOutageRisk(),
-    loadSyntheticSummary(),
-  ]);
+  const btn=document.getElementById('pred-refresh-btn');
+  btn.disabled=true;
+  showLoader('pred-spinner');
+  try{
+    await Promise.all([
+      loadOutageRisk(),
+      loadSyntheticSummary(),
+    ]);
+  }catch(e){
+    showToast(e.message||'Failed to refresh predictions','error');
+  }finally{
+    hideLoader('pred-spinner');
+    btn.disabled=false;
+  }
 }
 
 async function loadOutageRisk(){
@@ -1352,13 +1389,16 @@ async function syncOutagesNow(){
   const old = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'Syncing...';
+  showLoader('out-spinner');
   try{
     const res = await fetch(`${API}/outages/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({}) });
     if(!res.ok) throw new Error('Sync failed');
     await loadOutages();
+    showToast('Outages synced successfully','success');
   }catch(e){
-    alert(e.message || 'Could not sync outages now.');
+    showToast(e.message || 'Could not sync outages now.','error');
   }finally{
+    hideLoader('out-spinner');
     btn.disabled = false;
     btn.textContent = old;
   }
