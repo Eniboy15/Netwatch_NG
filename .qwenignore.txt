@@ -1,0 +1,6 @@
+/config/
+*.env
+.env.example
+secrets.json
+ssh/
+/backup/

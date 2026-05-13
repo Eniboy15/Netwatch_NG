@@ -289,6 +289,9 @@
           <option value="earth">Map style: Earth (satellite)</option>
           <option value="roads">Map style: Roads</option>
         </select>
+        <button class="nbtn" onclick="detectMyLocation()" style="width:100%;margin-top:6px">
+          📍 Find My Location
+        </button>
       </div>
       <div class="sb-sec">
         <div class="sb-ttl">Best provider by destination</div>
@@ -516,6 +519,7 @@ let selectedPlace = null;
 let towerCoverageCircle = null;
 let selectedTowerId = null;
 let riskMarkerLayer = null;
+let userLocationMarker = null;
 let SYNTHETIC_SUMMARY = {};
 
 // ═══════════════════════════════════════════════════════════
@@ -725,6 +729,80 @@ function setMapStyle(style){
   if(activeBaseLayer && map.hasLayer(activeBaseLayer)) map.removeLayer(activeBaseLayer);
   next.addTo(map);
   activeBaseLayer = next;
+}
+
+function detectMyLocation(){
+  if (!navigator.geolocation) {
+    showToast('Geolocation is not supported by this browser', 'error');
+    return;
+  }
+
+  const btn = event.target;
+  const originalText = btn.textContent;
+  btn.textContent = '📍 Detecting...';
+  btn.disabled = true;
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const { latitude, longitude } = position.coords;
+      
+      // Remove existing location marker if any
+      if (userLocationMarker && map.hasLayer(userLocationMarker)) {
+        map.removeLayer(userLocationMarker);
+      }
+      
+      // Add new location marker
+      userLocationMarker = L.circleMarker([latitude, longitude], {
+        radius: 8,
+        color: '#534AB7',
+        fillColor: '#534AB7',
+        fillOpacity: 0.5,
+        weight: 2,
+        opacity: 0.9
+      }).addTo(map);
+      
+      // Add popup
+      userLocationMarker.bindPopup(`
+        <div style="font-size:12px">
+          <strong>Your Location</strong><br>
+          Lat: ${latitude.toFixed(6)}<br>
+          Lon: ${longitude.toFixed(6)}
+        </div>
+      `).openPopup();
+      
+      // Pan and zoom to user location
+      map.setView([latitude, longitude], 15);
+      
+      // Show success message
+      showToast('Location detected successfully!', 'success');
+      
+      btn.textContent = originalText;
+      btn.disabled = false;
+    },
+    (error) => {
+      let errorMessage = 'Unable to retrieve your location';
+      switch(error.code) {
+        case error.PERMISSION_DENIED:
+          errorMessage = 'Location access denied by user';
+          break;
+        case error.POSITION_UNAVAILABLE:
+          errorMessage = 'Location information is unavailable';
+          break;
+        case error.TIMEOUT:
+          errorMessage = 'Location request timed out';
+          break;
+      }
+      showToast(errorMessage, 'error');
+      
+      btn.textContent = originalText;
+      btn.disabled = false;
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 300000 // 5 minutes
+    }
+  );
 }
 
 function placeTypeLabel(row){

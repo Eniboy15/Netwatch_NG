@@ -214,6 +214,8 @@ Implemented frontend features:
 - coverage radial circle on click
 - real HTTP speed test
 - outage summary and correlation panel
+- user location detection with automatic map centering
+- location marker with coordinates display
 
 Frontend still needs updates to fully visualize the newly imported synthetic datasets.
 
@@ -293,61 +295,28 @@ git push origin main
 ---
 
 ### 12) Current Import Status
-Known completed earlier:
+Completed as of May 13, 2026:
 - QoS import worked
 - Coverage import worked
+- All remaining imports completed successfully:
+  - Dropped calls
+  - Mobility traces
+  - Network penetration
+  - Technician logs
+- Code changes pushed to GitHub
+- New API endpoints verified on Render:
+  - `/api/dropped-calls?limit=5`
+  - `/api/mobility?limit=5`
+  - `/api/penetration?limit=5`
+  - `/api/technicians?limit=5`
 
-Most recent event:
-- `npm run import:remaining` was started
-- dropped calls likely completed before mobility started
-- mobility import reached about 445,500 rows, then failed with Windows `EBUSY`
-
-Next verification commands in Supabase SQL Editor:
-```sql
-SELECT COUNT(*) FROM qos_metrics;
-SELECT COUNT(*) FROM coverage_data;
-SELECT COUNT(*) FROM network_events;
-SELECT COUNT(*) FROM hardware_sensors;
-SELECT COUNT(*) FROM uptime_logs;
-SELECT COUNT(*) FROM energy_consumption;
-SELECT COUNT(*) FROM maintenance_orders;
-SELECT COUNT(*) FROM latency_logs;
-SELECT COUNT(*) FROM handover_records;
-SELECT COUNT(*) FROM dropped_calls;
-SELECT COUNT(*) FROM mobility_traces;
-SELECT COUNT(*) FROM network_penetration;
-SELECT COUNT(*) FROM technician_logs;
-```
-
-If mobility is below expected row count, rerun:
-```powershell
-npm run import:mobility
-```
-
-Then continue:
-```powershell
-npm run import:penetration
-npm run import:technicians
-```
-
-Or rerun all four safely:
-```powershell
-npm run import:remaining
-```
+All synthetic datasets are now imported and accessible via API.
 
 ---
 
 ### 13) Suggested Next Action
 Best next step:
-1. Finish/retry the remaining imports after closing any app that may lock CSV files
-2. Confirm row counts in Supabase
-3. Push the latest code changes to GitHub
-4. Verify Render endpoints:
-   - `/api/dropped-calls?limit=5`
-   - `/api/mobility?limit=5`
-   - `/api/penetration?limit=5`
-   - `/api/technicians?limit=5`
-5. Start building the first outage-risk scoring endpoint and Predictions dashboard tab
+- Start building the first outage-risk scoring endpoint and Predictions dashboard tab
 
 First prediction baseline should use:
 - low signal / high latency from readings and QoS
